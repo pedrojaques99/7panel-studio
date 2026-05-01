@@ -1,13 +1,34 @@
-# Mini Keyboard Dashboard
+# 7Panel Studio
 
 A live dashboard and automation backend for a physical mini keyboard on Windows.  
 Map keys to scripts, control app volumes, play sounds, manage a YouTube bot — all from a single React UI.
 
 ## Stack
 
-- **Backend** — Python / Flask (`dashboard_server.py`)
+- **Backend** — Python / Flask (`backend/dashboard_server.py`)
 - **Frontend** — React + Vite + TypeScript (`keyboard-ui/`)
 - **Automation** — AutoHotkey, PowerShell, VBScript
+
+## Structure
+
+```
+7Panel Studio/
+├── backend/                  ← Python backend
+│   ├── dashboard_server.py   ← Flask API (port 5000)
+│   ├── keyboard_controller.py
+│   ├── keyboard_daemon.py
+│   ├── mixer_controller.py
+│   ├── yt_bot.py
+│   ├── requirements.txt
+│   ├── keyboard_config.json
+│   ├── bot_config.json
+│   ├── keyboard_integration.ahk
+│   └── KEYBOARD_SETUP.md
+├── keyboard-ui/              ← React frontend (port 5173)
+├── 7Panel Studio.vbs         ← Launcher script
+├── LAUNCH.bat                ← Setup + launch
+└── START.bat
+```
 
 ## Panels
 
@@ -42,7 +63,7 @@ double-click LAUNCH.bat
 
 ```bash
 # Backend
-cd "New English software is set in the upgrade model-20240908"
+cd backend
 pip install -r requirements.txt
 python dashboard_server.py
 
@@ -56,11 +77,11 @@ npm run dev
 
 | File | Purpose |
 |------|---------|
-| `keyboard_config.json` | Key→action mappings |
-| `bot_config.json` | YouTube bot settings |
-| `client_secret.json` | Google OAuth credentials *(not in repo — add manually)* |
+| `backend/keyboard_config.json` | Key→action mappings |
+| `backend/bot_config.json` | YouTube bot settings |
+| `backend/client_secret.json` | Google OAuth credentials *(not in repo — add manually)* |
 
 ## YouTube Bot
 
 Requires a `client_secret.json` from [Google Cloud Console](https://console.cloud.google.com).  
-Place it in `New English software is set in the upgrade model-20240908/` before launching.
+Place it in `backend/` before launching.

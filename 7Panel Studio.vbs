@@ -13,9 +13,9 @@ sh.Run "powershell.exe -NoProfile -WindowStyle Hidden -Command ""Get-CimInstance
 ' Pequena espera pro socket :5000 liberar.
 WScript.Sleep 600
 
-sh.Run "cmd /c cd /d """ & base & "\New English software is set in the upgrade model-20240908"" && python dashboard_server.py", 0, False
+sh.Run "cmd /c cd /d """ & base & "\backend"" && python dashboard_server.py", 0, False
 WScript.Sleep 2000
-sh.Run "cmd /c cd /d """ & base & "\New English software is set in the upgrade model-20240908"" && python yt_bot.py", 1, False
+sh.Run "cmd /c cd /d """ & base & "\backend"" && python yt_bot.py", 1, False
 WScript.Sleep 1000
 sh.Run "cmd /c cd /d """ & base & "\keyboard-ui"" && npm run dev", 0, False
 WScript.Sleep 3000

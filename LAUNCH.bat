@@ -29,7 +29,7 @@ if errorlevel 1 (
 for /f "tokens=*" %%v in ('node --version 2^>^&1') do echo  [OK] Node %%v
 
 :: ── Python deps ───────────────────────────────────────────────────────────────
-set BACKEND=New English software is set in the upgrade model-20240908
+set BACKEND=backend
 if not exist "%BACKEND%\requirements.txt" goto skip_pip
 echo.
 echo  [1/2] Instalando dependencias Python...
