@@ -1,6 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { API } from '../lib/api'
 
+function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (id: PanelId) => void; onClose: () => void }) {
+  return (
+    <div
+      onClick={() => { onTogglePanel(p.id); onClose() }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
+        borderRadius: 10, cursor: 'pointer',
+        background: p.visible ? 'rgba(0,184,96,0.07)' : 'transparent',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={e => { if (!p.visible) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.05)' }}
+      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = p.visible ? 'rgba(0,184,96,0.07)' : 'transparent' }}
+    >
+      <span style={{ fontSize: 'var(--fs-4xl)', width: 28, textAlign: 'center' }}>{p.icon}</span>
+      <span style={{ flex: 1, fontSize: 'var(--fs-xl)', color: p.visible ? '#fff' : 'rgba(255,255,255,0.6)', fontWeight: p.visible ? 600 : 400 }}>{p.label}</span>
+      <span style={{
+        fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+        padding: '3px 8px', borderRadius: 5,
+        background: p.visible ? 'rgba(0,184,96,0.15)' : 'rgba(255,255,255,0.05)',
+        color: p.visible ? '#00b860' : 'rgba(255,255,255,0.25)',
+      }}>{p.visible ? 'Open' : 'Closed'}</span>
+    </div>
+  )
+}
+
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
   | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session'
@@ -54,6 +79,13 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
   const filteredPanels = panels.filter(p =>
     p.label.toLowerCase().includes(q) || p.icon.includes(q)
   )
+
+  const GROUPS: { label: string; ids: PanelId[] }[] = [
+    { label: 'Core',  ids: ['keys', 'mixer', 'soundboard'] },
+    { label: 'Live',  ids: ['obs', 'ytchat', 'briefing', 'session', 'timer'] },
+    { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab'] },
+    { label: 'Tools', ids: ['converter', 'exporter'] },
+  ]
 
   const filteredAssets = assets.filter(a =>
     a.name.toLowerCase().includes(q)
@@ -124,29 +156,22 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
               {filteredPanels.length === 0 && (
                 <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>No panels found</div>
               )}
-              {filteredPanels.map(p => (
-                <div
-                  key={p.id}
-                  onClick={() => { onTogglePanel(p.id); onClose() }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px',
-                    borderRadius: 10, cursor: 'pointer',
-                    background: p.visible ? 'rgba(0,184,96,0.07)' : 'transparent',
-                    transition: 'background 0.1s',
-                  }}
-                  onMouseEnter={e => { if (!p.visible) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.05)' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = p.visible ? 'rgba(0,184,96,0.07)' : 'transparent' }}
-                >
-                  <span style={{ fontSize: 'var(--fs-4xl)', width: 28, textAlign: 'center' }}>{p.icon}</span>
-                  <span style={{ flex: 1, fontSize: 'var(--fs-xl)', color: p.visible ? '#fff' : 'rgba(255,255,255,0.6)', fontWeight: p.visible ? 600 : 400 }}>{p.label}</span>
-                  <span style={{
-                    fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-                    padding: '3px 8px', borderRadius: 5,
-                    background: p.visible ? 'rgba(0,184,96,0.15)' : 'rgba(255,255,255,0.05)',
-                    color: p.visible ? '#00b860' : 'rgba(255,255,255,0.25)',
-                  }}>{p.visible ? 'Open' : 'Closed'}</span>
-                </div>
-              ))}
+
+              {/* Grouped view when no query */}
+              {!q && GROUPS.map(group => {
+                const groupPanels = group.ids.map(id => panels.find(p => p.id === id)).filter(Boolean) as PanelDef[]
+                return (
+                  <div key={group.label}>
+                    <div style={{ padding: '10px 12px 4px', fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.22)', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                      {group.label}
+                    </div>
+                    {groupPanels.map(p => <PanelRow key={p.id} p={p} onTogglePanel={onTogglePanel} onClose={onClose} />)}
+                  </div>
+                )
+              })}
+
+              {/* Flat filtered view when searching */}
+              {!!q && filteredPanels.map(p => <PanelRow key={p.id} p={p} onTogglePanel={onTogglePanel} onClose={onClose} />)}
             </div>
           )}
 

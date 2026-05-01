@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
-title Mini Keyboard - Setup ^& Launch
+title 7Panel Studio - Setup ^& Launch
 
 echo.
 echo  =====================================================
-echo    Mini Keyboard Dashboard - Setup ^& Launch
+echo    7Panel Studio - by MUD Co. ^& Jaques
 echo  =====================================================
 echo.
 
@@ -72,6 +72,6 @@ if not exist "%BACKEND%\client_secret.json" (
 echo.
 echo  Iniciando aplicacao...
 echo.
-wscript.exe //nologo "@jaques.vbs"
+wscript.exe //nologo "7Panel Studio.vbs"
 
 exit /b 0

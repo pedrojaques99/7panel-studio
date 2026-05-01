@@ -271,20 +271,20 @@ function AppInner() {
   const mxGeo  = loadGeo('mixer',      { x: 840, y: 20,  w: 320, h: 480 })
 
   const panelDefs: PanelDef[] = useMemo(() => [
-    { id: 'keys',       label: 'Keyboard',       icon: '⌨️', sidebar: isSidebarVisible('keys', true),       visible: showKeys },
-    { id: 'mixer',      label: 'Audio Mixer',    icon: '🎚️', sidebar: isSidebarVisible('mixer', true),      visible: showMixer },
-    { id: 'soundboard', label: 'Soundboard',     icon: '🎹', sidebar: isSidebarVisible('soundboard', true), visible: showSoundboard },
-    { id: 'obs',        label: 'OBS Control',    icon: '🎬', sidebar: isSidebarVisible('obs', true),        visible: showOBS },
-    { id: 'briefing',   label: 'Briefing',       icon: '📋', sidebar: isSidebarVisible('briefing', true),   visible: showBriefing },
-    { id: 'ytchat',     label: 'YouTube Chat',   icon: '💬', sidebar: isSidebarVisible('ytchat', true),     visible: showYTChat },
-    { id: 'timer',      label: 'Timer',          icon: '⏱',  sidebar: isSidebarVisible('timer', true),      visible: showTimer },
-    { id: 'drone',      label: 'Drone',          icon: '🌊', sidebar: isSidebarVisible('drone', true),      visible: showDrone },
-    { id: 'paul',       label: 'Paulstretch',    icon: '∿',  sidebar: isSidebarVisible('paul', true),       visible: showPaul },
-    { id: 'synth',      label: 'Synth',          icon: '🎛️', sidebar: isSidebarVisible('synth', true),      visible: showSynth },
-    { id: 'exporter',   label: 'Exporter',       icon: '⏺',  sidebar: isSidebarVisible('exporter', true),   visible: showExporter },
-    { id: 'converter',  label: 'Converter',      icon: '⇄',  sidebar: isSidebarVisible('converter', true),  visible: showConverter },
-    { id: 'looplab',    label: 'Loop Lab',       icon: '🔁', sidebar: isSidebarVisible('looplab', true),    visible: showLoopLab },
-    { id: 'session',    label: 'Session',        icon: '📼', sidebar: isSidebarVisible('session', true),    visible: showSession },
+    { id: 'keys',       label: 'Keyboard',       icon: '⌨️', sidebar: isSidebarVisible('keys', true),        visible: showKeys },
+    { id: 'mixer',      label: 'Audio Mixer',    icon: '🎚️', sidebar: isSidebarVisible('mixer', true),       visible: showMixer },
+    { id: 'soundboard', label: 'Soundboard',     icon: '🎹', sidebar: isSidebarVisible('soundboard', true),  visible: showSoundboard },
+    { id: 'obs',        label: 'OBS Control',    icon: '🎬', sidebar: isSidebarVisible('obs', true),         visible: showOBS },
+    { id: 'ytchat',     label: 'YouTube Chat',   icon: '💬', sidebar: isSidebarVisible('ytchat', true),      visible: showYTChat },
+    { id: 'timer',      label: 'Timer',          icon: '⏱',  sidebar: isSidebarVisible('timer', true),       visible: showTimer },
+    { id: 'briefing',   label: 'Briefing',       icon: '📋', sidebar: isSidebarVisible('briefing', false),   visible: showBriefing },
+    { id: 'session',    label: 'Session',        icon: '📼', sidebar: isSidebarVisible('session', false),    visible: showSession },
+    { id: 'drone',      label: 'Drone',          icon: '🌊', sidebar: isSidebarVisible('drone', false),      visible: showDrone },
+    { id: 'paul',       label: 'Paulstretch',    icon: '∿',  sidebar: isSidebarVisible('paul', false),       visible: showPaul },
+    { id: 'synth',      label: 'Synth',          icon: '🎛️', sidebar: isSidebarVisible('synth', false),      visible: showSynth },
+    { id: 'looplab',    label: 'Loop Lab',       icon: '🔁', sidebar: isSidebarVisible('looplab', false),    visible: showLoopLab },
+    { id: 'converter',  label: 'Converter',      icon: '⇄',  sidebar: isSidebarVisible('converter', false),  visible: showConverter },
+    { id: 'exporter',   label: 'Exporter',       icon: '⏺',  sidebar: isSidebarVisible('exporter', false),   visible: showExporter },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showSession, sidebarConfig])
 
