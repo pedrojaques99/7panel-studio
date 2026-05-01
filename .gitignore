@@ -50,3 +50,16 @@ assets/*.wav
 assets/*.webm
 assets/*.mp4
 
+
+# ─── Pasta do software chinês / fabricante ────────────────────────────────────
+New English software*/
+New English software is set in the upgrade model*/
+
+# ─── Mídia grande em qualquer subpasta ───────────────────────────────────────
+*.wav
+*.webm
+*.mp4
+*.mp3
+
+# ─── VBScript aleatório ───────────────────────────────────────────────────────
+@jaques.vbs
