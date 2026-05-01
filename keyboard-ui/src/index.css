@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces & Materials */
+  --bg-surface: #0a0a0c;
+  --bg-chassis: radial-gradient(ellipse at 30% 0%,#2e2f33 0%,transparent 60%), linear-gradient(160deg,#242527,#1a1b1d 50%,#141516);
+  --bg-input: #0b0c0e;
+  --bg-key-off: linear-gradient(145deg,#383a3d,#2a2b2e 55%,#1a1b1e);
+  --bg-key-on: linear-gradient(145deg,#2a2b2e,#1a1b1d);
+  --bg-btn-silver: linear-gradient(180deg,#e5e7eb,#9ca3af);
+
+  /* Shadows & Depth (Industrial Skeuomorphism) */
+  --shadow-chassis: 0 2px 0 rgba(255,255,255,.06) inset, 0 -1.5px 0 rgba(0,0,0,1) inset, 0 45px 90px rgba(0,0,0,.85);
+  --shadow-input: inset 0 6px 15px rgba(0,0,0,.8), 0 1.5px 0 rgba(255,255,255,.03);
+  --shadow-key-off: 0 9px 0 #111213, 0 12px 20px rgba(0,0,0,.6), inset 0 2px 0 rgba(255,255,255,.12), inset 0 -3px 6px rgba(0,0,0,.4);
+  --shadow-key-on: 0 3px 0 #000, inset 0 3px 6px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+  --shadow-btn: 0 12px 0 #4b5563, 0 30px 60px rgba(0,0,0,.5), inset 0 1.5px 0 rgba(255,255,255,.4);
+
+  /* Status Colors */
+  --status-ok: #00b860;
+  --status-err: #ef4444;
+  --status-neutral: rgba(255,255,255,0.2);
+
+  /* Typography — color */
+  --text-pure: #ffffff;
+  --text-90: rgba(255,255,255,0.9);
+  --text-70: rgba(255,255,255,0.7);
+  --text-40: rgba(255,255,255,0.4);
+  --text-20: rgba(255,255,255,0.2);
+
+  /* Typography — size scale (base = 10px, compact UI) */
+  --fs-3xs:  6px;   /* micro labels, extreme density     */
+  --fs-2xs:  7px;   /* tight secondary labels             */
+  --fs-xs:   8px;   /* secondary labels, metadata         */
+  --fs-sm:   9px;   /* supporting text, captions          */
+  --fs-base: 10px;  /* UI default — most used             */
+  --fs-md:   11px;  /* standard readable text             */
+  --fs-lg:   12px;  /* prominent text, inputs             */
+  --fs-xl:   13px;  /* section labels                     */
+  --fs-2xl:  14px;  /* small titles, close buttons        */
+  --fs-3xl:  16px;  /* panel titles                       */
+  --fs-4xl:  18px;  /* medium headings                    */
+  --fs-5xl:  20px;  /* large headings                     */
+  --fs-6xl:  24px;  /* display                            */
+  --fs-7xl:  30px;  /* display large                      */
+  --fs-8xl:  36px;  /* hero                               */
+  --fs-9xl:  48px;  /* hero extra                         */
+
+  /* Status — extended */
+  --status-warn: #f59e0b;
+
+  /* Popup / context menu surface */
+  --bg-popup: linear-gradient(160deg,#26272a,#1c1d1f);
+
+  /* Dimensions */
+  --radius-panel: 28px;
+  --radius-input: 16px;
+  --radius-key: 14px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+  --gap-standard: 12px;
+  --key-size: clamp(88px, 8vw, 120px);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  background: var(--bg-surface);
+  color: var(--text-pure);
+  font-family: 'Outfit', sans-serif;
+}
+
+body.overlay {
+  background: transparent !important;
+}
+html.overlay {
+  background: transparent !important;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Thin scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+
+@keyframes key-tile-led {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+@keyframes key-tile-spin {
+  to { transform: rotate(360deg); }
+}
+.key-tile-spin { animation: key-tile-spin 0.7s linear infinite; }
+
+@keyframes obs-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
+
+/* Panel drag UX */
+.panel-drag {
+  transition: filter 0.18s ease-out;
+  will-change: transform;
+}
+.panel-drag.dragging {
+  filter: brightness(1.06) drop-shadow(0 28px 56px rgba(0,0,0,0.9));
+  transition: none;
+  cursor: grabbing !important;
+}
+
+/* Canvas Grid */
+.canvas-grid {
+  background-size: 40px 40px;
+  background-image: 
+    radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-position: center center;
+}

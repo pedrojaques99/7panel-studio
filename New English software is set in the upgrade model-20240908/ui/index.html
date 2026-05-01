@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity | Keyboard Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0c;
+            --chassis: #1e1f21;
+            --chassis-hi: #2c2d30;
+            --chassis-lo: #141416;
+            --key-face: #2a2b2e;
+            --key-hi:   #383a3d;
+            --key-side: #111213;
+            --accent:   #00f2ff;
+            --accent-glow: rgba(0,242,255,0.3);
+            --text:     #ffffff;
+            --text-dim: #a0a0a0;
+            --border:   rgba(255,255,255,0.07);
+            --key-text: #ffffff;
+            --key-glow: rgba(0,0,0,0);
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Outfit',sans-serif; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 72px;
+            background: rgba(0,0,0,0.45);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 22px 0;
+            gap: 28px;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            width: 38px; height: 38px;
+            background: linear-gradient(135deg, #00f2ff, #0090aa);
+            border-radius: 11px;
+            box-shadow: 0 0 18px rgba(0,242,255,0.35);
+        }
+
+        /* ── Main ── */
+        .main {
+            flex: 1;
+            padding: 36px 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+            min-width: 0;
+        }
+
+        header { display: flex; flex-direction: column; gap: 6px; }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+
+        .subtitle { color: var(--text-dim); font-size: 0.9rem; }
+
+        #status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            background: rgba(0,255,100,0.08);
+            color: #00e87a;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            width: fit-content;
+            margin-top: 4px;
+        }
+
+        .dot {
+            width: 7px; height: 7px;
+            background: #00e87a;
+            border-radius: 50%;
+            animation: pulse 1.6s infinite;
+        }
+
+        @keyframes pulse {
+            0%,100% { transform: scale(0.9); opacity: 1; }
+            50%      { transform: scale(1.25); opacity: 0.5; }
+        }
+
+        /* ── Layout grid ── */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: auto minmax(260px, 320px);
+            gap: clamp(14px, 2vw, 28px);
+            align-items: start;
+        }
+
+        @media (max-width: 780px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ══════════════════════════════════════
+           CHASSIS — the physical device body
+        ══════════════════════════════════════ */
+        .device-chassis {
+            background:
+                radial-gradient(ellipse at 30% 0%, #2e2f33 0%, transparent 60%),
+                linear-gradient(160deg, #242527 0%, #1a1b1d 50%, #141516 100%);
+            border-radius: clamp(12px, 1.5vw, 22px);
+            padding: clamp(12px, 1.5vw, 22px);
+            padding-bottom: clamp(14px, 1.8vw, 26px);
+            box-shadow:
+                0 2px 0 rgba(255,255,255,0.06) inset,
+                0 -1px 0 rgba(0,0,0,0.6) inset,
+                0 20px 60px rgba(0,0,0,0.7),
+                0 4px 12px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.05);
+            width: fit-content;
+            max-width: min(340px, 90vw);
+        }
+
+        /* ── Knob section ── */
+        .knob-row {
+            display: flex;
+            align-items: flex-end;
+            gap: clamp(10px, 1.2vw, 18px);
+            margin-bottom: clamp(12px, 1.5vw, 20px);
+            padding: 0 2px;
+        }
+
+        /* Brushed-aluminum knob */
+        .knob {
+            border-radius: 50%;
+            position: relative;
+            cursor: pointer;
+            flex-shrink: 0;
+            background:
+                radial-gradient(circle at 38% 32%, #d8d8d8 0%, #9a9a9a 28%, #555 58%, #222 100%);
+            box-shadow:
+                0 0 0 3px #111,
+                0 0 0 5px #444,
+                0 10px 28px rgba(0,0,0,0.85),
+                0 4px 8px rgba(0,0,0,0.6),
+                inset 0 2px 4px rgba(255,255,255,0.25),
+                inset 0 -3px 6px rgba(0,0,0,0.55);
+            transition: transform 0.12s ease;
+            user-select: none;
+            cursor: grab;
+        }
+
+        .knob:active { cursor: grabbing; }
+
+        .knob::after {
+            content: '';
+            position: absolute;
+            top: 13%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 4px; height: 4px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 50%;
+            box-shadow: 0 0 4px rgba(255,255,255,0.4);
+        }
+
+        .knob-small { width: clamp(36px, 4.5vw, 56px); height: clamp(36px, 4.5vw, 56px); }
+        .knob-large { width: clamp(46px, 5.5vw, 70px); height: clamp(46px, 5.5vw, 70px); }
+
+        .knob-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .knob-label {
+            font-size: 0.58rem;
+            color: #666;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .led-cluster {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-left: 4px;
+            align-self: center;
+        }
+
+        .led {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+        }
+
+        .led-on  { background: #ff3030; box-shadow: 0 0 5px #ff3030; }
+        .led-off { background: #2a2a2a; box-shadow: inset 0 1px 2px rgba(0,0,0,0.5); }
+
+        /* ── Keys grid ── */
+        .keys-section {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: clamp(6px, 0.8vw, 10px);
+            width: 100%;
+        }
+
+        /* ══════════════════════════
+           MECHANICAL KEYCAP — ivory/vintage
+        ══════════════════════════ */
+        .key-btn {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 9px;
+            cursor: pointer;
+            position: relative;
+            border: none;
+            outline: none;
+            overflow: visible;
+            transition: transform 0.06s, box-shadow 0.06s;
+
+            background: linear-gradient(145deg, var(--key-hi) 0%, var(--key-face) 55%, #1a1b1e 100%);
+
+            box-shadow:
+                0 6px 0 var(--key-side),
+                0 8px 14px rgba(0,0,0,0.6),
+                inset 0 1px 0 rgba(255,255,255,0.12),
+                inset 0 -2px 4px rgba(0,0,0,0.4);
+        }
+
+        .key-btn:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.06);
+        }
+
+        .key-btn:active {
+            transform: translateY(4px);
+            box-shadow:
+                0 2px 0 var(--key-side),
+                0 3px 8px rgba(0,0,0,0.4),
+                inset 0 1px 0 rgba(255,255,255,0.3),
+                inset 0 -1px 3px rgba(0,0,0,0.2);
+            filter: brightness(0.94);
+        }
+
+        .key-btn.active {
+            background: linear-gradient(145deg, #383c42, #2c3035);
+            box-shadow:
+                0 2px 0 var(--key-side),
+                0 3px 8px rgba(0,0,0,0.5),
+                0 6px 20px rgba(0,242,255,0.35),
+                inset 0 1px 0 rgba(0,242,255,0.1),
+                inset 0 -1px 3px rgba(0,0,0,0.4);
+        }
+
+        .key-btn.drag-over {
+            transform: translateY(-2px) scale(1.04);
+            filter: brightness(1.2);
+            box-shadow:
+                0 6px 0 var(--key-side),
+                0 8px 20px rgba(0,242,255,0.4),
+                0 0 26px rgba(0,242,255,0.25),
+                inset 0 1px 0 rgba(255,255,255,0.15);
+        }
+
+        /* Key content */
+        .key-inner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: clamp(3px, 0.5vw, 6px) 4px;
+            pointer-events: none;
+        }
+
+        .key-label {
+            font-size: 0.6rem;
+            color: rgba(255,255,255,0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 3px;
+        }
+
+        .key-action {
+            font-weight: 600;
+            font-size: 0.68rem;
+            text-align: center;
+            color: rgba(255,255,255,0.75);
+            line-height: 1.2;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 0 4px;
+        }
+
+        .key-icon {
+            font-size: 1.3rem;
+            line-height: 1;
+            margin-bottom: 2px;
+        }
+
+        .drop-hint {
+            position: absolute;
+            bottom: 5px;
+            font-size: 0.48rem;
+            color: var(--accent);
+            opacity: 0;
+            transition: opacity 0.2s;
+            letter-spacing: 0.03em;
+            pointer-events: none;
+        }
+
+        .key-btn.drag-over .drop-hint { opacity: 1; }
+
+        /* ── Config Panel ── */
+        .config-panel {
+            background: linear-gradient(160deg, #1e1f22 0%, #18191b 100%);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 18px;
+            padding: 26px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            height: fit-content;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        }
+
+        .config-panel h2 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            padding-bottom: 14px;
+        }
+
+        .form-group { display: flex; flex-direction: column; gap: 7px; }
+
+        label { font-size: 0.78rem; color: var(--text-dim); }
+
+        select, input {
+            background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #fff;
+            padding: 11px 12px;
+            border-radius: 10px;
+            outline: none;
+            font-size: 0.85rem;
+            transition: border-color 0.2s;
+        }
+
+        select:focus, input:focus { border-color: var(--accent); }
+
+        .btn-save {
+            background: linear-gradient(135deg, #00e5f0, #00b8c8);
+            color: #000;
+            border: none;
+            padding: 13px;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 16px rgba(0,242,255,0.25);
+        }
+
+        .btn-save:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 24px rgba(0,242,255,0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo"></div>
+    </div>
+
+    <div class="main">
+        <header>
+            <h1>Keyboard Center</h1>
+            <div class="subtitle">Arraste arquivos (.mp3, .exe) diretamente para os botões.</div>
+            <div id="status-pill"><div class="dot"></div> Teclado Ativo</div>
+        </header>
+
+        <div class="dashboard-grid">
+
+            <!-- Physical device replica -->
+            <div class="device-chassis">
+
+                <!-- Knobs row -->
+                <div class="knob-row">
+                    <div class="knob-wrap">
+                        <div class="knob knob-small" title="Volume / Encoder 1"></div>
+                        <span class="knob-label">VOL</span>
+                    </div>
+                    <div class="knob-wrap">
+                        <div class="knob knob-large" title="Scroll / Encoder 2"></div>
+                        <span class="knob-label">SCR</span>
+                    </div>
+                    <div class="led-cluster">
+                        <div class="led led-on"></div>
+                        <div class="led led-off"></div>
+                    </div>
+                </div>
+
+                <!-- 3×4 key grid -->
+                <div class="keys-section" id="keyboard-grid">
+                    <!-- generated by JS -->
+                </div>
+
+            </div>
+
+            <!-- Config panel -->
+            <div class="config-panel" id="editor" style="display:none;">
+                <h2 id="editor-title">Configurar Tecla</h2>
+
+                <div class="form-group">
+                    <label>Tipo de Ação</label>
+                    <select id="action-type" onchange="toggleFields()">
+                        <option value="play_audio">🔈 Tocar Áudio</option>
+                        <option value="open_app">🚀 Abrir Aplicativo</option>
+                        <option value="run_script">📜 Executar Script (PS)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="field-path">
+                    <label>Caminho do Arquivo / App</label>
+                    <input type="text" id="action-path" placeholder="C:\Caminho\arquivo.exe">
+                </div>
+
+                <div class="form-group" id="field-args">
+                    <label>Argumentos (Opcional)</label>
+                    <input type="text" id="action-args" placeholder="--silent">
+                </div>
+
+                <button class="btn-save" onclick="saveAction()">SALVAR CONFIGURAÇÃO</button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        let currentConfig = {};
+        let selectedKey = null;
+
+        const keys = [
+            'key_f13', 'key_f14', 'key_f15',
+            'key_f16', 'key_f17', 'key_f18',
+            'key_f19', 'key_f20', 'key_f21',
+            'key_f22', 'key_f23', 'key_f24'
+        ];
+
+        const iconMap = { play_audio: '🔈', open_app: '🚀', run_script: '📜' };
+
+        async function init() {
+            const resp = await fetch('http://localhost:5000/api/config');
+            currentConfig = await resp.json();
+            renderKeyboard();
+        }
+
+        function renderKeyboard() {
+            const grid = document.getElementById('keyboard-grid');
+            grid.innerHTML = '';
+
+            keys.forEach(key => {
+                const action = currentConfig.buttons?.[key] || currentConfig[key] || {};
+                const name = key.replace('key_', '').toUpperCase();
+
+                let icon = '';
+                let label = 'Vazio';
+                if (action.type && action.path) {
+                    icon = iconMap[action.type] || '';
+                    label = action.path.split(/[\\/]/).pop();
+                }
+
+                const btn = document.createElement('div');
+                btn.className = `key-btn ${selectedKey === key ? 'active' : ''}`;
+                btn.innerHTML = `
+                    <div class="key-inner">
+                        ${icon ? `<div class="key-icon">${icon}</div>` : ''}
+                        <div class="key-label">${name}</div>
+                        <div class="key-action">${label}</div>
+                    </div>
+                    <div class="drop-hint">SOLTAR</div>
+                `;
+
+                btn.onclick = () => selectKey(key);
+
+                btn.addEventListener('dragover', e => {
+                    e.preventDefault();
+                    btn.classList.add('drag-over');
+                });
+                btn.addEventListener('dragleave', () => btn.classList.remove('drag-over'));
+                btn.addEventListener('drop', async e => {
+                    e.preventDefault();
+                    btn.classList.remove('drag-over');
+                    const file = e.dataTransfer.files[0];
+                    if (file) await handleFileDrop(key, file);
+                });
+
+                grid.appendChild(btn);
+            });
+        }
+
+        async function handleFileDrop(key, file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const resp = await fetch('http://localhost:5000/api/upload', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (result.status === 'success') {
+                    let type = 'open_app';
+                    if (file.name.match(/\.(mp3|wav|ogg|flac|m4a)$/i)) type = 'play_audio';
+                    if (file.name.endsWith('.ps1')) type = 'run_script';
+
+                    if (!currentConfig.buttons) currentConfig.buttons = {};
+                    currentConfig.buttons[key] = { type, path: result.path, args: '', label: file.name };
+
+                    await fetch('http://localhost:5000/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentConfig)
+                    });
+                    renderKeyboard();
+                }
+            } catch (e) {
+                console.error('Drop failed', e);
+                alert('Erro ao processar o arquivo arrastado!');
+            }
+        }
+
+        function selectKey(key) {
+            selectedKey = key;
+            const editor = document.getElementById('editor');
+            editor.style.display = 'flex';
+            document.getElementById('editor-title').innerText = 'Configurar ' + key.replace('key_', '').toUpperCase();
+
+            const action = currentConfig.buttons?.[key] || currentConfig[key] || {};
+            document.getElementById('action-type').value = action.type || 'play_audio';
+            document.getElementById('action-path').value = action.path || '';
+            document.getElementById('action-args').value = action.args || '';
+
+            renderKeyboard();
+            toggleFields();
+        }
+
+        function toggleFields() {
+            const type = document.getElementById('action-type').value;
+            document.getElementById('field-args').style.display =
+                (type === 'open_app' || type === 'run_script') ? 'flex' : 'none';
+        }
+
+        async function saveAction() {
+            if (!selectedKey) return;
+            const saveBtn = document.querySelector('.btn-save');
+            const orig = saveBtn.innerText;
+            saveBtn.innerText = '⌛ SALVANDO...';
+            saveBtn.disabled = true;
+
+            const action = {
+                type: document.getElementById('action-type').value,
+                path: document.getElementById('action-path').value,
+                args: document.getElementById('action-args').value,
+                label: document.getElementById('action-path').value.split(/[\\/]/).pop()
+            };
+
+            if (!currentConfig.buttons) currentConfig.buttons = {};
+            currentConfig.buttons[selectedKey] = action;
+
+            try {
+                const resp = await fetch('http://localhost:5000/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentConfig)
+                });
+                if (resp.ok) {
+                    saveBtn.innerText = '✅ SALVO!';
+                    saveBtn.style.background = 'linear-gradient(135deg,#00e87a,#00c060)';
+                    setTimeout(() => {
+                        saveBtn.innerText = orig;
+                        saveBtn.style.background = '';
+                        saveBtn.disabled = false;
+                    }, 2000);
+                } else throw new Error();
+            } catch (e) {
+                alert('Falha ao salvar. Verifique se dashboard_server.py está rodando.');
+                saveBtn.innerText = orig;
+                saveBtn.disabled = false;
+            }
+
+            renderKeyboard();
+        }
+
+        init();
+
+        // ── Knob drag-to-rotate ──
+        document.querySelectorAll('.knob').forEach(knob => {
+            let dragging = false;
+            let startY = 0;
+            let currentAngle = 0;
+
+            knob.addEventListener('mousedown', e => {
+                dragging = true;
+                startY = e.clientY;
+                knob.style.transition = 'none';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', e => {
+                if (!dragging) return;
+                const delta = startY - e.clientY;   // drag up = clockwise
+                currentAngle += delta * 1.2;
+                currentAngle = Math.max(-150, Math.min(150, currentAngle));
+                knob.style.transform = `rotate(${currentAngle}deg)`;
+                startY = e.clientY;
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!dragging) return;
+                dragging = false;
+                knob.style.transition = '';
+                document.body.style.userSelect = '';
+            });
+        });
+    </script>
+</body>
+</html>

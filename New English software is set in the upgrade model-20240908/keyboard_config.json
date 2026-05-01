@@ -1,0 +1,97 @@
+{
+    "auto_msgs": [
+        {
+            "enabled": true,
+            "intervalMins": 15,
+            "prefix": "💬",
+            "text": "Use !club para entrar na nossa comunidade!"
+        },
+        {
+            "enabled": true,
+            "intervalMins": 20,
+            "prefix": "💬",
+            "text": "Use !discord e cola no nosso canal."
+        }
+    ],
+    "buttons": {
+        "key_1": {
+            "args": "",
+            "label": "Open VS Code",
+            "path": "code",
+            "type": "open_app"
+        },
+        "key_f13": {
+            "label": "Foguete Invisível (Sem Limites)",
+            "path": "Z:\\jaques.dsgn\\sfx  music\\foguete.mp3",
+            "type": "play_audio"
+        },
+        "key_f14": {
+            "args": "",
+            "label": "Abrir OBS Studio",
+            "path": "C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe",
+            "type": "open_app"
+        },
+        "key_f15": {
+            "args": "",
+            "label": "sinister-laugh-140131.mp3",
+            "path": "C:\\Users\\Usuario\\Music\\sinister-laugh-140131.mp3",
+            "type": "play_audio"
+        },
+        "key_f16": {
+            "args": "",
+            "label": "som_ytpbr_musica-triste.mp3",
+            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\som_ytpbr_musica-triste.mp3",
+            "type": "play_audio"
+        },
+        "key_f17": {
+            "args": "",
+            "label": "surprise-sound-effect-99300.mp3",
+            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\surprise-sound-effect-99300.mp3",
+            "type": "play_audio"
+        },
+        "key_f18": {
+            "args": "",
+            "label": "puta-mano.mp3",
+            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\puta-mano.mp3",
+            "type": "play_audio"
+        },
+        "key_f23": {
+            "args": "",
+            "label": "News",
+            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\desifreemusic-stealth-mission-secret-spy-background-music-for-covert-ops-512649.mp3",
+            "type": "play_audio"
+        },
+        "key_f24": {
+            "args": "",
+            "label": "Ambient Test",
+            "path": "https://www.youtube.com/watch?v=TkQ-S0nvcGg",
+            "type": "play_audio"
+        },
+        "key_f22": {
+            "type": "play_audio",
+            "path": "",
+            "args": "",
+            "label": ""
+        }
+    },
+    "commands": {
+        "!Club": "https://chat.whatsapp.com/JTr3CSr7bWmFF9RjUf5Y2a",
+        "!discord": "Chama a galera e bora **criar essa comunidade junto**!  Esse é o **link de convite** oficial: https://discord.gg/sPuYFNf8zm",
+        "!figma": "https://www.figma.com/design/oY5FXJuLvGv2UszYguvV4w/Jaques%C2%AE-%E2%80%A2-Trabalhe-Comigo?node-id=0-1&t=08vD36p4jWqzrfQW-1"
+    },
+    "comments": "Map keyboard keys to actions. Voltamos para o Python Invisible Player para evitar o limite do Soundpad.",
+    "volume_controls": {
+        "obs_volume_down": {
+            "app": "obs64.exe",
+            "delta": -0.05,
+            "label": "OBS Volume Down",
+            "type": "adjust_volume"
+        },
+        "obs_volume_up": {
+            "app": "obs64.exe",
+            "delta": 0.05,
+            "label": "OBS Volume Up",
+            "type": "adjust_volume"
+        }
+    }
+}
