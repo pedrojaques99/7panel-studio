@@ -58,6 +58,20 @@ if not exist "keyboard-ui\node_modules" (
     echo  [OK] Node modules ja instalados.
 )
 
+:: ── Check ffmpeg ──────────────────────────────────────────────────────────────
+ffmpeg -version >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  [AVISO] ffmpeg nao encontrado no PATH.
+    echo  Converter, Paulstretch e download de audio nao vao funcionar.
+    echo  Instale em: https://ffmpeg.org/download.html
+    echo  Ou via winget: winget install ffmpeg
+    echo.
+) else (
+    for /f "tokens=3" %%v in ('ffmpeg -version 2^>^&1 ^| findstr /i "ffmpeg version"') do echo  [OK] ffmpeg %%v & goto ffmpeg_ok
+    :ffmpeg_ok
+)
+
 :: ── Check credentials ─────────────────────────────────────────────────────────
 if not exist "%BACKEND%\client_secret.json" (
     echo.
