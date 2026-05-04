@@ -70,7 +70,21 @@ function AppInner() {
   const [showTimer, setShowTimer] = useState(() => localStorage.getItem('panel-timer') === 'true')
   const [showDrone, setShowDrone] = useState(() => localStorage.getItem('panel-drone') === 'true')
   const [showPaul, setShowPaul] = useState(() => localStorage.getItem('panel-paul') === 'true')
-  const [showSynth, setShowSynth] = useState(() => localStorage.getItem('panel-synth') === 'true')
+  const [synthIds, setSynthIds] = useState<string[]>(() => {
+    const saved = localStorage.getItem('panel-synth-ids')
+    if (saved) try { const arr = JSON.parse(saved); if (Array.isArray(arr) && arr.length) return arr } catch {}
+    return localStorage.getItem('panel-synth') === 'true' ? ['synth-0'] : []
+  })
+  const showSynth = synthIds.length > 0
+  const setShowSynth = (v: boolean | ((prev: boolean) => boolean)) => {
+    setSynthIds(prev => {
+      const wasOpen = prev.length > 0
+      const val = typeof v === 'function' ? v(wasOpen) : v
+      if (!val) return []
+      // Toggle on or add another instance
+      return [...prev, `synth-${Date.now()}`]
+    })
+  }
   const [showExporter, setShowExporter] = useState(() => localStorage.getItem('panel-exporter') === 'true')
   const [showConverter, setShowConverter] = useState(() => localStorage.getItem('panel-converter') === 'true')
   const [showLoopLab, setShowLoopLab] = useState(() => localStorage.getItem('panel-looplab') === 'true')
@@ -123,7 +137,7 @@ function AppInner() {
   useEffect(() => { localStorage.setItem('panel-timer', String(showTimer)) }, [showTimer])
   useEffect(() => { localStorage.setItem('panel-drone', String(showDrone)) }, [showDrone])
   useEffect(() => { localStorage.setItem('panel-paul', String(showPaul)) }, [showPaul])
-  useEffect(() => { localStorage.setItem('panel-synth', String(showSynth)) }, [showSynth])
+  useEffect(() => { localStorage.setItem('panel-synth', String(showSynth)); localStorage.setItem('panel-synth-ids', JSON.stringify(synthIds)) }, [synthIds])
   useEffect(() => { localStorage.setItem('panel-exporter', String(showExporter)) }, [showExporter])
   useEffect(() => { localStorage.setItem('panel-converter', String(showConverter)) }, [showConverter])
   useEffect(() => { localStorage.setItem('panel-looplab', String(showLoopLab)) }, [showLoopLab])
@@ -279,10 +293,10 @@ function AppInner() {
     { id: 'ytchat',     label: 'YouTube Chat',   icon: '💬', sidebar: isSidebarVisible('ytchat', true),      visible: showYTChat },
     { id: 'timer',      label: 'Timer',          icon: '⏱',  sidebar: isSidebarVisible('timer', true),       visible: showTimer },
     { id: 'briefing',   label: 'Briefing',       icon: '📋', sidebar: isSidebarVisible('briefing', false),   visible: showBriefing },
-    { id: 'session',    label: 'Session',        icon: '📼', sidebar: isSidebarVisible('session', false),    visible: showSession },
+    { id: 'session',    label: 'Session',        icon: '📼', sidebar: isSidebarVisible('session', true),     visible: showSession },
     { id: 'drone',      label: 'Drone',          icon: '🌊', sidebar: isSidebarVisible('drone', false),      visible: showDrone },
     { id: 'paul',       label: 'Paulstretch',    icon: '∿',  sidebar: isSidebarVisible('paul', false),       visible: showPaul },
-    { id: 'synth',      label: 'Synth',          icon: '🎛️', sidebar: isSidebarVisible('synth', false),      visible: showSynth },
+    { id: 'synth',      label: 'Synth',          icon: '🎛️', sidebar: isSidebarVisible('synth', true),       visible: showSynth },
     { id: 'looplab',    label: 'Loop Lab',       icon: '🔁', sidebar: isSidebarVisible('looplab', false),    visible: showLoopLab },
     { id: 'converter',  label: 'Converter',      icon: '⇄',  sidebar: isSidebarVisible('converter', false),  visible: showConverter },
     { id: 'exporter',   label: 'Exporter',       icon: '⏺',  sidebar: isSidebarVisible('exporter', false),   visible: showExporter },
@@ -303,6 +317,47 @@ function AppInner() {
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [])
 
+  /* ── Figma-style wheel: scroll=pan Y, shift+scroll=pan X, ctrl+scroll=zoom ── */
+  const canvasRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+
+    const handleCanvasWheel = (e: WheelEvent) => {
+      if (!transformRef.current) return
+      const { setTransform, zoomIn, zoomOut, state } = transformRef.current
+
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        if (e.deltaY < 0) zoomIn(0.15)
+        else zoomOut(0.15)
+        return
+      }
+
+      e.preventDefault()
+      const PAN_SPEED = 1.2
+      let dx = 0
+      let dy = 0
+
+      if (e.shiftKey) {
+        dx = -e.deltaY * PAN_SPEED
+      } else {
+        dx = -e.deltaX * PAN_SPEED
+        dy = -e.deltaY * PAN_SPEED
+      }
+
+      setTransform(
+        state.positionX + dx,
+        state.positionY + dy,
+        state.scale,
+      )
+    }
+
+    el.addEventListener('wheel', handleCanvasWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleCanvasWheel)
+  }, [])
+
   return (
     <div
       className="flex h-screen overflow-hidden font-['Outfit',sans-serif] text-[var(--text-pure)]"
@@ -317,19 +372,17 @@ function AppInner() {
 
       {/* Sidebar */}
       <aside
-        className="w-[72px] border-r border-white/5 flex flex-col items-center py-4 gap-2 shrink-0 sticky top-0 z-20 overflow-y-auto"
+        className="w-[72px] border-r border-white/5 flex flex-col items-center justify-center gap-2 shrink-0 sticky top-0 z-20 overflow-y-auto"
         style={{ background: 'linear-gradient(180deg,rgba(22,23,25,0.9) 0%,rgba(12,13,15,0.95) 100%)', backdropFilter: 'blur(20px)', height: '100vh' }}
       >
         {/* Ctrl+K button */}
         <button
           onClick={() => setShowPalette(v => !v)}
           title="Command Palette (Ctrl+K)"
-          style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)', background: showPalette ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 'var(--fs-xl)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s', fontWeight: 700 }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.12)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = showPalette ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)' }}
+          className={`sidebar-cmd${showPalette ? ' active' : ''}`}
         >⌘</button>
 
-        <div style={{ width: 32, height: 1, background: 'rgba(255,255,255,0.07)' }} />
+        <div className="w-8 h-px bg-white/[0.07]" />
 
         {/* Dynamic sidebar buttons — only panels with sidebar=true */}
         {panelDefs.filter(p => p.sidebar).map(p => (
@@ -345,14 +398,12 @@ function AppInner() {
             Object.values(deckSyncersRef.current).forEach(fn => fn(false))
           }}
           title="Force Stop All (keyboard audio)"
-          style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: 'rgba(239,68,68,0.7)', cursor: 'pointer', fontSize: 'var(--fs-2xl)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.2)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(239,68,68,1)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.08)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(239,68,68,0.7)' }}
+          className="sidebar-stop"
         >■</button>
 
         {/* Online status */}
         <div
-          className="w-2 h-2 rounded-full mb-4 mt-auto"
+          className="w-2 h-2 rounded-full"
           style={{
             background: online ? 'var(--status-ok)' : 'var(--status-err)',
             boxShadow: online ? '0 0 8px rgba(0,184,96,0.5)' : '0 0 8px rgba(239,68,68,0.5)',
@@ -361,7 +412,7 @@ function AppInner() {
       </aside>
 
       {/* Free-canvas */}
-      <main className="flex-1 relative z-10 overflow-hidden" style={{ minHeight: '100vh' }}>
+      <main ref={canvasRef} className="flex-1 relative z-10 overflow-hidden" style={{ minHeight: '100vh' }}>
         <TransformWrapper
           ref={transformRef}
           initialScale={scale}
@@ -379,23 +430,21 @@ function AppInner() {
             allowLeftClickPan: true,
             velocityDisabled: false
           }}
-          wheel={{
-            step: 0.1,
-            activationKeys: ['Control'],
-          }}
+          wheel={{ disabled: true }}
           pinch={{ disabled: false }}
         >
           {({ zoomIn, zoomOut, resetTransform, state }) => (
             <>
-              {/* Background instructions hint (briefly shown or subtle) */}
-              <div className="fixed top-20 left-1/2 -translate-x-1/2 z-0 pointer-events-none opacity-35 flex gap-8 text-[10px] font-black uppercase tracking-[0.3em]">
-                <span>[Space] Pan</span>
-                <span>[Ctrl+Wheel] Zoom</span>
-                <span>[Click] Select</span>
+              {/* Background instructions hint — fades out after 3s */}
+              <div className="fixed top-20 left-1/2 -translate-x-1/2 z-0 pointer-events-none flex gap-8 text-[10px] font-black uppercase tracking-[0.3em] canvas-hint">
+                <span>[Scroll] Pan</span>
+                <span>[Shift+Scroll] Pan H</span>
+                <span>[Ctrl+Scroll] Zoom</span>
+                <span>[Space] Drag</span>
               </div>
 
               {/* Floating UI controls for Zoom/Pan */}
-              <div className="fixed bottom-6 left-6 z-[100] flex items-center gap-3 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl">
+              <div className="fixed bottom-6 left-[96px] z-[100] flex items-center gap-3 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl">
                 <button onClick={() => zoomOut(0.15)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-all text-lg">−</button>
                 <div 
                   className="px-3 py-1 rounded-lg bg-white/5 cursor-pointer hover:bg-white/10 transition-colors flex flex-col items-center"
@@ -617,7 +666,7 @@ const action = config.buttons?.[key] || {} as any
         {showTimer && <TimerPanel onClose={() => setShowTimer(false)} />}
         {showDrone && <DronePanel onClose={() => setShowDrone(false)} />}
         {showPaul && <PaulstretchPanel onClose={() => setShowPaul(false)} />}
-        {showSynth && <SynthPanel onClose={() => setShowSynth(false)} />}
+        {synthIds.map(id => <SynthPanel key={id} instanceId={id} onClose={() => setSynthIds(prev => prev.filter(x => x !== id))} />)}
         {showExporter && <ExporterPanel onClose={() => setShowExporter(false)} />}
         {showConverter && <ConverterPanel onClose={() => setShowConverter(false)} />}
         {showLoopLab && <LoopLabPanel onClose={() => setShowLoopLab(false)} />}

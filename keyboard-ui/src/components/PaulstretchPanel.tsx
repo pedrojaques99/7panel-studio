@@ -368,7 +368,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
             <button onClick={() => setShowYt(v => !v)}
               style={{ ...actionBtn, color: showYt ? '#ef4444' : 'rgba(255,80,80,0.6)' }}
               title="YouTube">YT</button>
-            <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff"
+            <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff,.webm"
               style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
           </div>

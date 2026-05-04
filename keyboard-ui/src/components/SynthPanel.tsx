@@ -20,6 +20,21 @@ type Status = 'idle' | 'loading' | 'ready' | 'playing'
 
 type SeqStep = { noteName: string; cents: number }
 
+type TimedEvent = { noteName: string; cents: number; timeMs: number; durationMs: number }
+
+type SeqLoop = {
+  steps: SeqStep[]
+  muted: boolean
+  freestyle?: TimedEvent[]
+  freestyleLenMs?: number
+}
+
+const LOOP_COLORS = ['#a78bfa', '#34d399', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316']
+
+function crushWet(bits: number): number {
+  return bits >= 12 ? 0 : 1
+}
+
 /* ── Controlled knob built on the existing Knob1 SVG ──────────────── */
 
 const KNOB_NATIVE = { w: 81, h: 75 }
@@ -31,18 +46,23 @@ function SynthKnob({
   fmt?: (v: number) => string; accent?: string; onChange: (v: number) => void
 }) {
   const [drag, setDrag] = useState(false)
+  const [hover, setHover] = useState(false)
+  const [flash, setFlash] = useState(false)
   const lastY = useRef(0)
+  const shiftRef = useRef(false)
   const sc = size / KNOB_NATIVE.w
   const scaledH = Math.round(KNOB_NATIVE.h * sc)
   const rotation = -135 + ((value - min) / (max - min)) * 270
+  const clamp = (v: number) => Math.max(min, Math.min(max, v))
 
   useEffect(() => {
     if (!drag) return
     const onMove = (e: MouseEvent) => {
       const dy = lastY.current - e.clientY
       lastY.current = e.clientY
-      const delta = dy * 0.022 * (max - min)
-      onChange(Math.max(min, Math.min(max, value + delta)))
+      shiftRef.current = e.shiftKey
+      const sensitivity = e.shiftKey ? 0.004 : 0.022
+      onChange(clamp(value + dy * sensitivity * (max - min)))
     }
     const onUp = () => setDrag(false)
     document.addEventListener('mousemove', onMove)
@@ -53,22 +73,53 @@ function SynthKnob({
     }
   }, [drag, value, min, max, onChange])
 
+  const onWheel = (e: React.WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return
+    e.preventDefault(); e.stopPropagation()
+    const sensitivity = e.shiftKey ? 0.002 : 0.012
+    const delta = (e.deltaY < 0 ? 1 : -1) * sensitivity * (max - min)
+    onChange(clamp(value + delta))
+  }
+
   const onDoubleClick = () => onChange((min + max) / 2)
+
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    // right-click: random nudge — no shift = light, shift = medium, ctrl+shift = hard
+    const range = max - min
+    const spread = e.ctrlKey && e.shiftKey ? 0.8 : e.shiftKey ? 0.4 : 0.15
+    const nudge = (Math.random() - 0.5) * 2 * spread * range
+    onChange(clamp(value + nudge))
+    setFlash(true); setTimeout(() => setFlash(false), 200)
+  }
 
   return (
     <div
       className="select-none"
-      onMouseDown={e => { setDrag(true); lastY.current = e.clientY; e.preventDefault() }}
+      onMouseDown={e => { if (e.button === 0) { setDrag(true); lastY.current = e.clientY; e.preventDefault() } }}
       onDoubleClick={onDoubleClick}
-      title={`${label}: ${fmt ? fmt(value) : value.toFixed(2)} (drag y / dbl-click reset)`}
-      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'grab' }}
+      onContextMenu={onContextMenu}
+      onWheel={onWheel}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title={`${label}: ${fmt ? fmt(value) : value.toFixed(2)}\ndrag ↕ · shift fine · ctrl+scroll · dbl-click reset\nright-click: random nudge (shift=med ctrl+shift=hard)`}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+        cursor: drag ? 'grabbing' : 'grab',
+        opacity: hover || drag ? 1 : 0.85,
+        transition: 'opacity 0.15s',
+      }}
     >
-      <div style={{ width: size, height: scaledH, position: 'relative' }}>
+      <div style={{
+        width: size, height: scaledH, position: 'relative',
+        filter: flash ? `drop-shadow(0 0 10px ${accent})` : hover ? `drop-shadow(0 0 6px ${accent}44)` : 'none',
+        transition: 'filter 0.15s',
+      }}>
         <div style={{ transform: `scale(${sc})`, transformOrigin: 'top left', width: KNOB_NATIVE.w, height: KNOB_NATIVE.h }}>
           <Knob rotation={rotation} />
         </div>
       </div>
-      <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: 'var(--text-40)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: hover ? 'var(--text-60)' : 'var(--text-40)', textTransform: 'uppercase', transition: 'color 0.15s' }}>{label}</span>
       <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', color: accent, marginTop: -2 }}>
         {fmt ? fmt(value) : value.toFixed(2)}
       </span>
@@ -132,11 +183,12 @@ function Scope({ analyser, color, height = 84 }: {
 
 /* ── Piano keyboard (horizontal, white + black) ──────────────────── */
 
-function Piano({ activeNotes, sequence, seqStep, seqPlaying, onNoteOn, onNoteOff, onToggleSeq }: {
+function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa', onNoteOn, onNoteOff, onToggleSeq }: {
   activeNotes: Set<string>
   sequence: SeqStep[]
   seqStep: number
   seqPlaying: boolean
+  seqColor?: string
   onNoteOn: (noteName: string, cents: number) => void
   onNoteOff: (noteName: string) => void
   onToggleSeq: (noteName: string, cents: number) => void
@@ -146,7 +198,6 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, onNoteOn, onNoteOff
     Object.entries(KEY_NOTE).find(([, n]) => n === note)?.[0] ?? ''
 
   const seqIndex = (n: string) => sequence.findIndex(s => s.noteName === n)
-  const seqColor = '#a78bfa'
 
   const downHandlers = (noteName: string, cents: number) => ({
     onMouseDown: (e: React.MouseEvent) => {
@@ -156,6 +207,10 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, onNoteOn, onNoteOff
     onMouseUp: (e: React.MouseEvent) => {
       if (e.button !== 0) return
       onNoteOff(noteName)
+    },
+    onMouseEnter: (e: React.MouseEvent) => {
+      if (!(e.buttons & 1)) return
+      onNoteOn(noteName, cents)
     },
     onMouseLeave: (e: React.MouseEvent) => {
       if ((e.buttons & 1) && activeNotes.has(noteName)) onNoteOff(noteName)
@@ -290,7 +345,7 @@ type FxParams = {
   reverbDecay: number // seconds 0.5..30
   vol: number         // 0..1 (linear, will be converted to dB)
   // Atmospheric FX
-  crush: number       // BitCrusher bits 1..12 (12 = transparent)
+  crush: number       // BitCrusher bits 4..12 (12 = transparent)
   chorus: number      // wet 0..1 (lush detune shimmer)
   phaser: number      // wet 0..1 (slow moving fog)
   delay: number       // wet 0..1 (ping-pong tape echo)
@@ -547,9 +602,11 @@ function PresetRow({ preset, active, onApply, onDelete }: {
 
 /* ── Panel ─────────────────────────────────────────────────────────── */
 
-export function SynthPanel({ onClose }: { onClose: () => void }) {
+export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => void; instanceId?: string }) {
   const { zOf, bringToFront, endDrag, isDragging, scale } = usePanelCtx()
-  const geo = loadGeo('synth', { x: 480, y: 100, w: 520, h: 0 })
+  const geoKey = instanceId === 'synth' ? 'synth' : instanceId
+  const panelId = instanceId
+  const geo = loadGeo(geoKey, { x: 480 + Math.random() * 40, y: 100 + Math.random() * 40, w: 520, h: 0 })
 
   const [fx, setFx] = useState<FxParams>(FX_DEFAULTS)
   const [paulMode, setPaulMode] = useState(false)
@@ -559,6 +616,12 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
   const [urlInput, setUrlInput] = useState('')
   const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set())
   const [showYt, setShowYt] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recElapsed, setRecElapsed] = useState(0)
+  const [recStatus, setRecStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recChunksRef = useRef<Blob[]>([])
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Presets
@@ -567,21 +630,31 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
   const [currentPresetId, setCurrentPresetId] = useState<string | null>('f-init')
   const presetBtnRef = useRef<HTMLButtonElement>(null)
 
-  // Sequencer
-  const [sequence, setSequence] = useState<SeqStep[]>([])
+  // Sequencer — multi-loop
+  const [loops, setLoops] = useState<SeqLoop[]>([{ steps: [], muted: false }])
+  const [activeLoopIdx, setActiveLoopIdx] = useState(0)
   const [seqPlaying, setSeqPlaying] = useState(false)
-  const [seqStep, setSeqStep] = useState(-1)
-  const [seqBpm, setSeqBpm] = useState(80) // 1..180
-  // Gate: 0 = staccato (2% of step), 1 = matches step, >1 = legato overlap
+  const [seqSteps, setSeqSteps] = useState<number[]>([-1]) // per-loop step index for UI
+  const [seqBpm, setSeqBpm] = useState(80)
   const [seqGate, setSeqGate] = useState(0.85)
   const seqIntervalRef = useRef<number | null>(null)
-  const seqStepIdxRef = useRef(0)
-  const sequenceRef = useRef<SeqStep[]>([])
-  sequenceRef.current = sequence
+  const seqStepIdxRefs = useRef<number[]>([0])
+  const loopsRef = useRef<SeqLoop[]>(loops)
+  loopsRef.current = loops
   const seqBpmRef = useRef(seqBpm)
   seqBpmRef.current = seqBpm
   const seqGateRef = useRef(seqGate)
   seqGateRef.current = seqGate
+  const activeSequence = loops[activeLoopIdx]?.steps ?? []
+  const totalSteps = loops.reduce((s, l) => s + (l.muted ? 0 : l.steps.length), 0)
+  const hasAnyContent = loops.some(l => l.steps.length > 0 || (l.freestyle && l.freestyle.length > 0))
+
+  // Freestyle loop recording
+  const [freestyleRec, setFreestyleRec] = useState(false)
+  const freestyleStartRef = useRef(0)
+  const freestyleEventsRef = useRef<TimedEvent[]>([])
+  const freestyleNoteStartRef = useRef<Map<string, number>>(new Map())
+  const freestyleTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
 
   const engineRef = useRef<Engine | null>(null)
   const fxRef = useRef(fx); fxRef.current = fx
@@ -593,9 +666,9 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
 
   /* register capture */
   useEffect(() => {
-    captureRegistry.register({ id: 'synth', label: 'Synth', getStream: getSynthCaptureStream, setMonitor: setSynthMonitor })
+    captureRegistry.register({ id: panelId, label: `Synth${panelId !== 'synth' ? ` ${panelId.slice(-4)}` : ''}`, getStream: getSynthCaptureStream, setMonitor: setSynthMonitor })
     return () => {
-      captureRegistry.unregister('synth')
+      captureRegistry.unregister(panelId)
       synthMonitorEnabled = true  // reset for next mount
     }
   }, [])
@@ -644,8 +717,8 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
     await Tone.start()
     ensureSynthTap()
     const p = fxRef.current
-    const bitcrusher = new Tone.BitCrusher(Math.max(1, Math.round(p.crush)))
-    bitcrusher.wet.value = p.crush >= 12 ? 0 : 1
+    const bitcrusher = new Tone.BitCrusher(Math.max(4, Math.round(p.crush)))
+    bitcrusher.wet.value = crushWet(p.crush)
     const distortion = new Tone.Distortion({ distortion: p.drive, wet: 1 })
     const chebyshev = new Tone.Chebyshev({ order: Math.max(1, Math.round(p.bite)), wet: 0.6 })
     const filter = new Tone.Filter({ frequency: p.cutoff, type: 'lowpass', Q: p.resonance })
@@ -726,9 +799,9 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
         if (patch.resonance !== undefined) e.fx.filter.Q.value = patch.resonance
         if (patch.reverbWet !== undefined) e.fx.reverb.wet.rampTo(patch.reverbWet, 0.05)
         if (patch.crush !== undefined) {
-          const b = Math.max(1, Math.round(patch.crush))
+          const b = Math.max(4, Math.round(patch.crush))
           e.fx.bitcrusher.bits.value = b
-          e.fx.bitcrusher.wet.rampTo(b >= 12 ? 0 : 1, 0.05)
+          e.fx.bitcrusher.wet.rampTo(crushWet(b), 0.05)
         }
         if (patch.chorus !== undefined) e.fx.chorus.wet.rampTo(patch.chorus, 0.05)
         if (patch.phaser !== undefined) e.fx.phaser.wet.rampTo(patch.phaser, 0.05)
@@ -756,19 +829,51 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
     updateFx({ paul: m.grainSize, rate: m.playbackRate })
   }
 
-  /* ── Sequencer ── */
+  /* ── Sequencer (multi-loop) ── */
 
   function toggleInSequence(noteName: string, cents: number) {
-    setSequence(prev => {
-      const idx = prev.findIndex(s => s.noteName === noteName)
-      if (idx >= 0) return prev.filter((_, i) => i !== idx)
-      return [...prev, { noteName, cents }]
-    })
+    setLoops(prev => prev.map((loop, i) => {
+      if (i !== activeLoopIdx) return loop
+      const idx = loop.steps.findIndex(s => s.noteName === noteName)
+      if (idx >= 0) return { ...loop, steps: loop.steps.filter((_, j) => j !== idx) }
+      return { ...loop, steps: [...loop.steps, { noteName, cents }] }
+    }))
   }
 
-  function clearSequence() {
+  function addLoop() {
+    setLoops(prev => {
+      if (prev.length >= LOOP_COLORS.length) return prev
+      return [...prev, { steps: [], muted: false }]
+    })
+    setActiveLoopIdx(loops.length)
+    seqStepIdxRefs.current = [...seqStepIdxRefs.current, 0]
+    setSeqSteps(prev => [...prev, -1])
+  }
+
+  function removeLoop(idx: number) {
+    if (loops.length <= 1) return
     stopSeq()
-    setSequence([])
+    setLoops(prev => prev.filter((_, i) => i !== idx))
+    seqStepIdxRefs.current = seqStepIdxRefs.current.filter((_, i) => i !== idx)
+    setSeqSteps(prev => prev.filter((_, i) => i !== idx))
+    setActiveLoopIdx(i => i >= idx ? Math.max(0, i - 1) : i)
+  }
+
+  function toggleMuteLoop(idx: number) {
+    setLoops(prev => prev.map((l, i) => i === idx ? { ...l, muted: !l.muted } : l))
+  }
+
+  function clearActiveLoop() {
+    stopSeq()
+    setLoops(prev => prev.map((l, i) => i === activeLoopIdx ? { ...l, steps: [] } : l))
+  }
+
+  function clearAllLoops() {
+    stopSeq()
+    setLoops([{ steps: [], muted: false }])
+    setActiveLoopIdx(0)
+    seqStepIdxRefs.current = [0]
+    setSeqSteps([-1])
   }
 
   function stopSeq() {
@@ -776,88 +881,205 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
       window.clearInterval(seqIntervalRef.current)
       seqIntervalRef.current = null
     }
-    seqStepIdxRef.current = 0
-    setSeqStep(-1)
+    stopFreestylePlayback()
+    seqStepIdxRefs.current = seqStepIdxRefs.current.map(() => 0)
+    setSeqSteps(prev => prev.map(() => -1))
     setSeqPlaying(false)
-    // release any sustained polysynth notes from the sequencer
     const e = engineRef.current
     if (e) try { e.polySynth.releaseAll() } catch{ /* noop */ }
     setActiveNotes(new Set())
   }
 
+  function playNote(noteName: string, cents: number, noteMs: number) {
+    const e = engineRef.current; if (!e) return
+    if (e.player && statusRef.current === 'playing') {
+      e.player.detune = cents
+    } else {
+      try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch{ /* noop */ }
+    }
+    setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
+    window.setTimeout(() => {
+      setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
+    }, noteMs)
+  }
+
+  function tick() {
+    const allLoops = loopsRef.current
+    const e = engineRef.current; if (!e) return
+    const stepMs = 60000 / seqBpmRef.current
+    const noteMs = Math.max(20, stepMs * Math.max(0.02, seqGateRef.current))
+    const newSteps = [...seqStepIdxRefs.current]
+    const uiSteps: number[] = []
+
+    for (let i = 0; i < allLoops.length; i++) {
+      const loop = allLoops[i]
+      if (loop.muted || loop.steps.length === 0) { uiSteps.push(-1); continue }
+      const idx = (newSteps[i] ?? 0) % loop.steps.length
+      newSteps[i] = idx + 1
+      uiSteps.push(idx)
+      const { noteName, cents } = loop.steps[idx]
+      playNote(noteName, cents, noteMs)
+    }
+    seqStepIdxRefs.current = newSteps
+    setSeqSteps(uiSteps)
+  }
+
   async function startSeq() {
-    if (sequenceRef.current.length === 0) return
+    if (!hasAnyContent) return
     await ensureEngine()
     stopSeq()
-    seqStepIdxRef.current = 0
-
-    function tick() {
-      const seq = sequenceRef.current
-      if (seq.length === 0) { stopSeq(); return }
-      const step = seqStepIdxRef.current % seq.length
-      seqStepIdxRef.current = step + 1
-      setSeqStep(step)
-
-      const { noteName, cents } = seq[step]
-      const e = engineRef.current; if (!e) return
-      const stepMs = 60000 / seqBpmRef.current
-      // gate < 1 → silent gap; gate ≥ 1 → notes overlap (legato)
-      const noteMs = Math.max(20, stepMs * Math.max(0.02, seqGateRef.current))
-
-      if (e.player && statusRef.current === 'playing') {
-        // Sample drone path: re-pitch sustained drone
-        e.player.detune = cents
-        setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
-        window.setTimeout(() => {
-          setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
-        }, noteMs)
-      } else {
-        // PolySynth path: short attack/release
-        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch{ /* noop */ }
-        setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
-        window.setTimeout(() => {
-          setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
-        }, noteMs)
-      }
+    // Start step-sequenced loops
+    if (totalSteps > 0) {
+      tick()
+      seqIntervalRef.current = window.setInterval(tick, 60000 / seqBpmRef.current)
     }
-
-    tick() // play first step immediately
-    seqIntervalRef.current = window.setInterval(tick, 60000 / seqBpmRef.current)
+    // Start freestyle loops
+    for (let i = 0; i < loopsRef.current.length; i++) {
+      const l = loopsRef.current[i]
+      if (!l.muted && l.freestyle && l.freestyle.length > 0) playFreestyleLoop(i)
+    }
     setSeqPlaying(true)
   }
 
-  // Restart interval when bpm changes mid-play (preserve step index)
   useEffect(() => {
     if (!seqPlaying) return
     if (seqIntervalRef.current != null) window.clearInterval(seqIntervalRef.current)
-    const id = window.setInterval(() => {
-      // re-run the same tick logic by toggling — simpler: replicate
-      const seq = sequenceRef.current
-      if (seq.length === 0) { stopSeq(); return }
-      const step = seqStepIdxRef.current % seq.length
-      seqStepIdxRef.current = step + 1
-      setSeqStep(step)
-      const { noteName, cents } = seq[step]
-      const e = engineRef.current; if (!e) return
-      const stepMs = 60000 / seqBpmRef.current
-      // gate < 1 → silent gap; gate ≥ 1 → notes overlap (legato)
-      const noteMs = Math.max(20, stepMs * Math.max(0.02, seqGateRef.current))
-      if (e.player && statusRef.current === 'playing') {
-        e.player.detune = cents
-        setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
-        window.setTimeout(() => setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n }), noteMs)
-      } else {
-        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch{ /* noop */ }
-        setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
-        window.setTimeout(() => setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n }), noteMs)
-      }
-    }, 60000 / seqBpm)
+    const id = window.setInterval(tick, 60000 / seqBpm)
     seqIntervalRef.current = id
     return () => { window.clearInterval(id) }
   }, [seqBpm, seqPlaying])
 
   // Cleanup sequencer on unmount
   useEffect(() => () => stopSeq(), [])
+
+  // Cleanup recorder on unmount
+  useEffect(() => () => { stopRecording() }, [])
+
+  async function startRecording() {
+    const eng = await ensureEngine()
+    ensureSynthTap()
+    // Connect analyser → capture dest if not already connected
+    if (eng && synthCaptureDest) {
+      try { eng.fx.analyser.connect(synthCaptureDest) } catch { /* already connected */ }
+    }
+    const stream = getSynthCaptureStream()
+    if (!stream) return
+    recChunksRef.current = []
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+    const recorder = new MediaRecorder(stream, { mimeType })
+    recorder.ondataavailable = e => { if (e.data.size > 0) recChunksRef.current.push(e.data) }
+    recorder.onstop = async () => {
+      const blob = new Blob(recChunksRef.current, { type: mimeType })
+      if (blob.size === 0) return
+      setRecStatus('saving')
+      try {
+        const fd = new FormData()
+        fd.append('file', blob, `synth-rec-${Date.now()}.webm`)
+        const upRes = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
+        if (!upRes.ok) { setRecStatus('error'); return }
+        const { path: filePath } = await upRes.json()
+
+        const convRes = await fetch(`${API}/api/convert/wav-to-mp3`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: filePath, bitrate: '192k' }),
+        })
+        if (!convRes.ok) { setRecStatus('error'); return }
+        const { job_id: jobId } = await convRes.json()
+
+        for (let i = 0; i < 60; i++) {
+          const s = await fetch(`${API}/api/convert/status/${jobId}`).then(r => r.json())
+          if (s.status === 'done') { setRecStatus('saved'); setTimeout(() => setRecStatus('idle'), 3000); return }
+          if (s.status === 'error') { setRecStatus('error'); return }
+          await new Promise(r => setTimeout(r, 500))
+        }
+        setRecStatus('error')
+      } catch { setRecStatus('error') }
+    }
+    recorder.start(200)
+    recorderRef.current = recorder
+    setIsRecording(true); setRecElapsed(0)
+    const t0 = Date.now()
+    recTimerRef.current = setInterval(() => setRecElapsed(Math.floor((Date.now() - t0) / 1000)), 500)
+  }
+
+  function stopRecording() {
+    if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop()
+    }
+    recorderRef.current = null
+    setIsRecording(false); setRecElapsed(0)
+  }
+
+  function startFreestyleRec() {
+    freestyleEventsRef.current = []
+    freestyleNoteStartRef.current.clear()
+    freestyleStartRef.current = performance.now()
+    setFreestyleRec(true)
+  }
+
+  function stopFreestyleRec() {
+    const events = freestyleEventsRef.current
+    const loopLen = performance.now() - freestyleStartRef.current
+    // Close any still-held notes
+    freestyleNoteStartRef.current.forEach((startMs, noteName) => {
+      const cents = NOTE_CENTS[noteName as keyof typeof NOTE_CENTS] ?? 0
+      events.push({ noteName, cents, timeMs: startMs, durationMs: loopLen - startMs })
+    })
+    freestyleNoteStartRef.current.clear()
+    setFreestyleRec(false)
+    if (events.length === 0) return
+    setLoops(prev => prev.map((l, i) =>
+      i === activeLoopIdx ? { ...l, freestyle: events, freestyleLenMs: loopLen } : l
+    ))
+  }
+
+  function freestyleNoteOn(noteName: string) {
+    if (!freestyleRec) return
+    const t = performance.now() - freestyleStartRef.current
+    freestyleNoteStartRef.current.set(noteName, t)
+  }
+
+  function freestyleNoteOff(noteName: string) {
+    if (!freestyleRec) return
+    const startMs = freestyleNoteStartRef.current.get(noteName)
+    if (startMs === undefined) return
+    freestyleNoteStartRef.current.delete(noteName)
+    const t = performance.now() - freestyleStartRef.current
+    const cents = NOTE_CENTS[noteName as keyof typeof NOTE_CENTS] ?? 0
+    freestyleEventsRef.current.push({ noteName, cents, timeMs: startMs, durationMs: t - startMs })
+  }
+
+  // Playback for freestyle loops — schedule all events in a cycle via setTimeout
+  function playFreestyleLoop(loopIdx: number) {
+    const loop = loopsRef.current[loopIdx]
+    if (!loop?.freestyle || loop.freestyle.length === 0 || !loop.freestyleLenMs) return
+    const e = engineRef.current; if (!e) return
+    const events = loop.freestyle
+    const lenMs = loop.freestyleLenMs
+
+    function scheduleCycle() {
+      if (!loopsRef.current[loopIdx] || loopsRef.current[loopIdx].muted) return
+      const fl = loopsRef.current[loopIdx].freestyle
+      if (!fl || fl.length === 0) return
+      for (const ev of fl) {
+        const tid = setTimeout(() => {
+          if (loopsRef.current[loopIdx]?.muted) return
+          playNote(ev.noteName, ev.cents, Math.max(20, ev.durationMs))
+        }, ev.timeMs)
+        freestyleTimersRef.current.set(tid as unknown as number, tid)
+      }
+      const nextTid = setTimeout(scheduleCycle, lenMs)
+      freestyleTimersRef.current.set(nextTid as unknown as number, nextTid)
+    }
+    scheduleCycle()
+  }
+
+  function stopFreestylePlayback() {
+    freestyleTimersRef.current.forEach(tid => clearTimeout(tid))
+    freestyleTimersRef.current.clear()
+  }
 
   function randomize() {
     const rnd = (a: number, b: number) => a + Math.random() * (b - a)
@@ -877,7 +1099,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
       reverbWet: rnd(0.3, 0.9),
       reverbDecay: rnd(3, 22),
       vol: rnd(0.5, 0.85),
-      crush: crushOn ? Math.round(rnd(3, 8)) : 12,
+      crush: crushOn ? Math.round(rnd(4, 8)) : 12,
       chorus: chorusOn ? rnd(0.3, 0.85) : 0,
       phaser: phaserOn ? rnd(0.25, 0.7) : 0,
       delay: delayOn ? rnd(0.2, 0.65) : 0,
@@ -896,7 +1118,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
       e.fx.filter.Q.value = next.resonance
       e.fx.reverb.wet.rampTo(next.reverbWet, 0.1)
       e.fx.bitcrusher.bits.value = next.crush
-      e.fx.bitcrusher.wet.rampTo(next.crush >= 12 ? 0 : 1, 0.1)
+      e.fx.bitcrusher.wet.rampTo(crushWet(next.crush), 0.1)
       e.fx.chorus.wet.rampTo(next.chorus, 0.1)
       e.fx.phaser.wet.rampTo(next.phaser, 0.1)
       e.fx.delay.wet.rampTo(next.delay, 0.1)
@@ -927,9 +1149,9 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
       e.fx.filter.frequency.rampTo(fxFull.cutoff, 0.05)
       e.fx.filter.Q.value = fxFull.resonance
       e.fx.reverb.wet.rampTo(fxFull.reverbWet, 0.05)
-      const b = Math.max(1, Math.round(fxFull.crush))
+      const b = Math.max(4, Math.round(fxFull.crush))
       e.fx.bitcrusher.bits.value = b
-      e.fx.bitcrusher.wet.rampTo(b >= 12 ? 0 : 1, 0.05)
+      e.fx.bitcrusher.wet.rampTo(crushWet(b), 0.05)
       e.fx.chorus.wet.rampTo(fxFull.chorus, 0.05)
       e.fx.phaser.wet.rampTo(fxFull.phaser, 0.05)
       e.fx.delay.wet.rampTo(fxFull.delay, 0.05)
@@ -985,20 +1207,23 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
 
   const noteOn = useCallback(async (noteName: string, cents: number) => {
     setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
+    freestyleNoteOn(noteName)
     const e = await ensureEngine()
-    // Sample drone playing → re-pitch the drone (sustained)
-    if (e.player && statusRef.current === 'playing') {
+    if (e.player) {
+      // Auto-start drone if sample is loaded but not playing yet
+      if (statusRef.current !== 'playing') {
+        try { e.player.start(); setStatus('playing') } catch { /* noop */ }
+      }
       e.player.detune = cents
       return
     }
-    // Else → polysynth attack (sustains until noteOff)
     try { e.polySynth.triggerAttack(noteName) } catch (err) { console.warn('synth attack err', err) }
   }, [])
 
   const noteOff = useCallback((noteName: string) => {
     setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
+    freestyleNoteOff(noteName)
     const e = engineRef.current; if (!e) return
-    // Drone mode keeps sustaining — only release polysynth notes
     if (e.player && statusRef.current === 'playing') return
     try { e.polySynth.triggerRelease(noteName) } catch{ /* noop */ }
   }, [])
@@ -1041,19 +1266,19 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
   const playing = status === 'playing'
 
   return (
-    <CaptureIdContext.Provider value="synth">
+    <CaptureIdContext.Provider value={panelId}>
     <Rnd
       default={{ x: geo.x, y: geo.y, width: geo.w || 520, height: 'auto' }}
       minWidth={460} maxWidth={760}
       enableResizing={{ right: true, left: true }}
       bounds={undefined}
       dragHandleClassName="synth-drag"
-      className={`panel-drag${isDragging('synth') ? ' dragging' : ''}`}
+      className={`panel-drag${isDragging(panelId) ? ' dragging' : ''}`}
       scale={scale}
-      onDragStart={() => bringToFront('synth')}
-      onDragStop={(_e, d) => { saveGeo('synth', { x: d.x, y: d.y }); endDrag('synth') }}
-      onResizeStop={(_e, _d, ref, _delta, pos) => saveGeo('synth', { w: ref.offsetWidth, x: pos.x, y: pos.y })}
-      style={{ zIndex: zOf('synth', 15) }}
+      onDragStart={() => bringToFront(panelId)}
+      onDragStop={(_e, d) => { saveGeo(geoKey, { x: d.x, y: d.y }); endDrag(panelId) }}
+      onResizeStop={(_e, _d, ref, _delta, pos) => saveGeo(geoKey, { w: ref.offsetWidth, x: pos.x, y: pos.y })}
+      style={{ zIndex: zOf(panelId, 15) }}
     >
       <div style={{
         borderRadius: 'var(--radius-panel)', background: 'var(--bg-chassis)',
@@ -1106,6 +1331,18 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
               }}>
               {playing ? '⏹ DRONE' : '▶ DRONE'}
             </button>
+            <button onClick={recStatus === 'saving' ? undefined : isRecording ? stopRecording : startRecording}
+              title={isRecording ? `Recording… ${Math.floor(recElapsed / 60)}:${String(recElapsed % 60).padStart(2, '0')} — click to stop & save MP3` : recStatus === 'saving' ? 'Converting to MP3…' : recStatus === 'saved' ? 'Saved to assets!' : 'Record to MP3'}
+              style={{
+                ...miniBtn, padding: '3px 10px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: recStatus === 'saved' ? 'rgba(0,184,96,0.25)' : recStatus === 'saving' ? 'rgba(255,165,0,0.25)' : isRecording ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.15)',
+                color: recStatus === 'saved' ? 'rgba(0,184,96,0.9)' : recStatus === 'saving' ? 'rgba(255,165,0,0.9)' : isRecording ? '#fff' : 'rgba(239,68,68,0.7)',
+                fontWeight: 900, letterSpacing: '0.1em',
+                animation: isRecording ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
+                cursor: recStatus === 'saving' ? 'wait' : 'pointer',
+              }}>
+              {recStatus === 'saving' ? '⏳ MP3…' : recStatus === 'saved' ? '✓ SAVED' : isRecording ? `⏹ ${Math.floor(recElapsed / 60)}:${String(recElapsed % 60).padStart(2, '0')}` : '⏺ REC'}
+            </button>
           </div>
         </PanelHeader>
 
@@ -1150,7 +1387,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
             <button onClick={() => setShowYt(v => !v)}
               style={{ ...actionBtn, color: showYt ? '#ef4444' : 'rgba(255,80,80,0.6)' }}
               title="YouTube">YT</button>
-            <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff"
+            <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff,.webm"
               style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
           </div>
@@ -1174,9 +1411,9 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
             fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ drive: v })} />
           <SynthKnob label="BITE" value={fx.bite} min={1} max={50} accent="#f59e0b"
             fmt={v => String(Math.round(v))} onChange={v => updateFx({ bite: v })} />
-          <SynthKnob label="CRUSH" value={fx.crush} min={1} max={12} accent="#fb923c"
+          <SynthKnob label="CRUSH" value={fx.crush} min={4} max={12} accent="#fb923c"
             fmt={v => v >= 12 ? '—' : `${Math.round(v)}b`} onChange={v => updateFx({ crush: v })} />
-          <SynthKnob label="CUTOFF" value={fx.cutoff} min={80} max={18000} accent="#06b6d4"
+          <SynthKnob label="CUTOFF" value={fx.cutoff} min={400} max={18000} accent="#06b6d4"
             fmt={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`}
             onChange={v => updateFx({ cutoff: v })} />
           <SynthKnob label="PAUL" value={fx.paul} min={0.05} max={1.5} accent="#a78bfa"
@@ -1214,48 +1451,103 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
 
         {/* Sequencer bar */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '6px 10px', borderRadius: 8,
-          background: sequence.length > 0
+          display: 'flex', flexDirection: 'column', gap: 5,
+          padding: '7px 10px', borderRadius: 8,
+          background: totalSteps > 0
             ? 'linear-gradient(90deg,rgba(167,139,250,0.08),rgba(167,139,250,0.02))'
             : 'rgba(255,255,255,0.02)',
-          border: `1px solid ${sequence.length > 0 ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.04)'}`,
+          border: `1px solid ${totalSteps > 0 ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.04)'}`,
         }}>
-          <button onClick={seqPlaying ? stopSeq : startSeq}
-            disabled={sequence.length === 0}
-            style={{
-              ...miniBtn, padding: '3px 10px', width: 'auto', fontSize: 'var(--fs-sm)',
-              background: seqPlaying ? '#a78bfa' : sequence.length > 0 ? 'rgba(167,139,250,0.25)' : 'rgba(255,255,255,0.05)',
-              color: seqPlaying ? '#000' : sequence.length > 0 ? '#a78bfa' : 'var(--text-20)',
-              opacity: sequence.length === 0 ? 0.4 : 1, fontWeight: 900,
-            }}>
-            {seqPlaying ? '⏹ SEQ' : '▶ SEQ'}
-          </button>
-          <span style={{ fontSize: 'var(--fs-xs)', fontFamily: 'monospace', color: 'var(--text-20)', whiteSpace: 'nowrap' }}>
-            {sequence.length === 0 ? 'right-click keys to build sequence' : `${sequence.length} step${sequence.length > 1 ? 's' : ''}`}
-          </span>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          {/* Row 1: Loop slots + play + clear */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <button onClick={seqPlaying ? stopSeq : startSeq}
+              disabled={!hasAnyContent}
+              style={{
+                ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
+                background: seqPlaying ? LOOP_COLORS[activeLoopIdx] : hasAnyContent ? 'rgba(167,139,250,0.25)' : 'rgba(255,255,255,0.05)',
+                color: seqPlaying ? '#000' : hasAnyContent ? '#a78bfa' : 'var(--text-20)',
+                opacity: !hasAnyContent ? 0.4 : 1, fontWeight: 900,
+              }}>
+              {seqPlaying ? '⏹' : '▶'}
+            </button>
+            <button onClick={freestyleRec ? stopFreestyleRec : startFreestyleRec}
+              title={freestyleRec ? 'Stop recording freestyle loop — play notes now!' : `Record freestyle loop into ${String.fromCharCode(65 + activeLoopIdx)}`}
+              style={{
+                ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
+                background: freestyleRec ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.12)',
+                color: freestyleRec ? '#fff' : 'rgba(239,68,68,0.6)',
+                fontWeight: 900,
+                animation: freestyleRec ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
+              }}>
+              {freestyleRec ? '⏹ REC' : '⏺'}
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', flex: 1 }}>
+              {loops.map((loop, i) => {
+                const color = LOOP_COLORS[i % LOOP_COLORS.length]
+                const isActive = i === activeLoopIdx
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <button
+                      onClick={() => setActiveLoopIdx(i)}
+                      onContextMenu={e => { e.preventDefault(); toggleMuteLoop(i) }}
+                      title={`Loop ${String.fromCharCode(65 + i)} — ${loop.steps.length} steps${loop.freestyle?.length ? ` + ${loop.freestyle.length} freestyle` : ''}${loop.muted ? ' (muted)' : ''} · right-click: mute`}
+                      style={{
+                        ...miniBtn, padding: '2px 6px', width: 'auto', fontSize: 'var(--fs-2xs)',
+                        background: isActive ? color : loop.muted ? 'rgba(255,255,255,0.03)' : `${color}22`,
+                        color: isActive ? '#000' : loop.muted ? 'var(--text-20)' : color,
+                        opacity: loop.muted ? 0.4 : 1,
+                        border: isActive ? `1px solid ${color}` : '1px solid transparent',
+                        fontWeight: 900,
+                        textDecoration: loop.muted ? 'line-through' : 'none',
+                      }}>
+                      {String.fromCharCode(65 + i)}{loop.steps.length > 0 ? `·${loop.steps.length}` : ''}{loop.freestyle?.length ? '♫' : ''}
+                    </button>
+                    {loops.length > 1 && isActive && (
+                      <button onClick={() => removeLoop(i)} title="Remove"
+                        style={{ ...miniBtn, width: 14, height: 14, padding: 0, fontSize: 8, color: 'rgba(239,68,68,0.6)' }}>✕</button>
+                    )}
+                  </div>
+                )
+              })}
+              {loops.length < LOOP_COLORS.length && (
+                <button onClick={addLoop} title="Add loop"
+                  style={{ ...miniBtn, width: 18, height: 18, padding: 0, fontSize: 'var(--fs-2xs)', color: 'var(--text-20)' }}>+</button>
+              )}
+            </div>
+            <span style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: freestyleRec ? 'rgba(239,68,68,0.8)' : 'var(--text-20)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {freestyleRec ? 'playing…' : !hasAnyContent ? 'right-click keys / ⏺ freestyle' : `${totalSteps} steps`}
+            </span>
+            {activeSequence.length > 0 && (
+              <button onClick={clearActiveLoop}
+                title={`Clear loop ${String.fromCharCode(65 + activeLoopIdx)}`}
+                style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.7)' }}>
+                clr
+              </button>
+            )}
+            {totalSteps > 0 && loops.length > 1 && (
+              <button onClick={clearAllLoops} title="Clear all"
+                style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.5)' }}>
+                all
+              </button>
+            )}
+          </div>
+          {/* Row 2: BPM + Gate */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <BpmControl bpm={seqBpm} onChange={setSeqBpm} min={1} max={180} accent="#a78bfa" showSlider />
-            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-40)', fontFamily: 'monospace', flexShrink: 0 }}>
-              gate {seqGate < 1 ? `${Math.round(seqGate * 100)}%` : seqGate === 1 ? 'tie' : `${seqGate.toFixed(2)}× lega`}
+            <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
+              gate {seqGate < 1 ? `${Math.round(seqGate * 100)}%` : seqGate === 1 ? 'tie' : `${seqGate.toFixed(1)}×`}
             </span>
             <input type="range" min={0.05} max={1.5} step={0.01} value={seqGate}
               onChange={e => setSeqGate(Number(e.target.value))}
-              style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 60 }}
-              title="Gate: <1 silent gap · 1 tie · >1 legato overlap (no silence between notes)" />
+              style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 50 }}
+              title="Gate: <1 silent gap · 1 tie · >1 legato overlap" />
           </div>
-          {sequence.length > 0 && (
-            <button onClick={clearSequence}
-              title="Clear sequence"
-              style={{ ...miniBtn, width: 'auto', padding: '3px 8px', fontSize: 'var(--fs-sm)', color: 'rgba(239,68,68,0.7)' }}>
-              clear
-            </button>
-          )}
         </div>
 
         {/* Piano */}
         <Piano activeNotes={activeNotes}
-          sequence={sequence} seqStep={seqStep} seqPlaying={seqPlaying}
+          sequence={activeSequence} seqStep={seqSteps[activeLoopIdx] ?? -1} seqPlaying={seqPlaying}
+          seqColor={LOOP_COLORS[activeLoopIdx % LOOP_COLORS.length]}
           onNoteOn={noteOn} onNoteOff={noteOff}
           onToggleSeq={toggleInSequence} />
       </div>
@@ -1280,8 +1572,24 @@ function MiniSlider({ label, value, min, max, step, fmt, onChange }: {
   label: string; value: number; min: number; max: number; step: number
   fmt: (v: number) => string; onChange: (v: number) => void
 }) {
+  const onWheel = (e: React.WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return
+    e.preventDefault(); e.stopPropagation()
+    const mult = e.shiftKey ? 0.2 : 1
+    const delta = (e.deltaY < 0 ? 1 : -1) * step * 3 * mult
+    onChange(Math.max(min, Math.min(max, value + delta)))
+  }
+  const onDoubleClick = () => onChange((min + max) / 2)
+  const onCtx = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const range = max - min
+    const spread = e.ctrlKey && e.shiftKey ? 0.8 : e.shiftKey ? 0.4 : 0.15
+    onChange(Math.max(min, Math.min(max, value + (Math.random() - 0.5) * 2 * spread * range)))
+  }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
+      onWheel={onWheel} onDoubleClick={onDoubleClick} onContextMenu={onCtx}
+      title={`${label}: ${fmt(value)} · ctrl+scroll · dbl-click reset · right-click: rnd nudge`}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: 'var(--text-20)' }}>{label}</span>
         <span style={{ fontSize: 'var(--fs-xs)', fontFamily: 'monospace', color: 'var(--text-40)' }}>{fmt(value)}</span>

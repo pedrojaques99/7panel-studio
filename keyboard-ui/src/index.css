@@ -100,6 +100,10 @@ html.overlay {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
   50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
 }
+@keyframes pulse-rec {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 
 /* Panel drag UX */
 .panel-drag {
@@ -115,7 +119,41 @@ html.overlay {
 /* Canvas Grid */
 .canvas-grid {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
   background-position: center center;
 }
+
+/* Canvas hint — visible briefly then fades */
+.canvas-hint {
+  opacity: 0.35;
+  animation: hint-fade 4s ease-out forwards;
+}
+@keyframes hint-fade {
+  0%, 60% { opacity: 0.35; }
+  100% { opacity: 0; }
+}
+
+/* Sidebar buttons */
+.sidebar-cmd {
+  width: 36px; height: 36px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.5);
+  cursor: pointer; font-size: var(--fs-xl); font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.sidebar-cmd:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.sidebar-cmd.active { background: rgba(255,255,255,0.1); }
+
+.sidebar-stop {
+  width: 36px; height: 36px; border-radius: 8px;
+  border: 1px solid rgba(239,68,68,0.3);
+  background: rgba(239,68,68,0.08);
+  color: rgba(239,68,68,0.7);
+  cursor: pointer; font-size: var(--fs-2xl);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.sidebar-stop:hover { background: rgba(239,68,68,0.2); color: rgba(239,68,68,1); }
