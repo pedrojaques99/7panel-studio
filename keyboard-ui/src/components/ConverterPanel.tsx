@@ -62,7 +62,7 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
         setInputPath(res.path)
         setOutputPath(res.path.replace(/\.[^.]+$/, '.mp3'))
       }
-    } catch {}
+    } catch { /* noop */ }
     setStatus('idle')
   }
 
@@ -101,9 +101,9 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
             setStatus('err')
             setErrorMsg(job.error || 'Conversion failed')
           }
-        } catch {}
+        } catch { /* noop */ }
       }, 400)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setStatus('err')
       setErrorMsg(String(e))
     }

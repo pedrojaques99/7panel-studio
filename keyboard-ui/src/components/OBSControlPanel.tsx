@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Rnd } from 'react-rnd'
 import OBSWebSocket from 'obs-websocket-js'
 import { loadGeo, saveGeo } from '../lib/geo'
-import { closeBtnStyle } from '../lib/styles'
 import { usePanelCtx } from '../lib/panel-context'
 import { PanelHeader } from '../lib/PanelHeader'
 
@@ -49,7 +48,7 @@ export function OBSControlPanel({ onClose }: { onClose: () => void }) {
     if (connectingRef.current) return
     connectingRef.current = true
 
-    if (obsRef.current) { try { await obsRef.current.disconnect() } catch {} }
+    if (obsRef.current) { try { await obsRef.current.disconnect() } catch{ /* noop */ } }
     const obs = new OBSWebSocket()
     obsRef.current = obs
 

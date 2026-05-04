@@ -30,7 +30,8 @@ export function YouTubeChatPanel({ onClose }: { onClose: () => void }) {
   const geo = loadGeo('ytchat', { x: 20, y: 520, w: 380, h: 500 })
 
   const [tab, setTab] = useState<'chat' | 'commands'>('chat')
-  const [modAlerts, setModAlerts] = useState<any[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const [modAlerts, setModAlerts] = useState<any[]>([])
 
   useEffect(() => {
     let active = true
@@ -40,7 +41,8 @@ export function YouTubeChatPanel({ onClose }: { onClose: () => void }) {
         try {
           const r = await fetch(`${API}/api/bot/mod-alerts`)
           const data = await r.json()
-          setModAlerts(data.filter((a: any) => !a.dismissed))
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+setModAlerts(data.filter((a: any) => !a.dismissed))
           delay = 3000
         } catch {
           delay = Math.min(delay * 2, 30_000)

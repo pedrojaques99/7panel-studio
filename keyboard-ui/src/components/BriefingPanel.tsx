@@ -35,7 +35,7 @@ const defaultTicker: TickerConfig = {
   separator: '◆',
   height: 40,
   bgOpacity: 72,
-  fontSize: 'var(--fs-lg)',
+  fontSize: 14,
   fontWeight: 500,
   textColor: '#ffffffa6',
   accentColor: '#00b860',
@@ -46,7 +46,7 @@ function loadTicker(): TickerConfig {
   try {
     const r = localStorage.getItem('overlay:ticker')
     if (r) return { ...defaultTicker, ...JSON.parse(r) }
-  } catch {}
+  } catch { /* noop */ }
   return defaultTicker
 }
 
@@ -68,7 +68,7 @@ const defaultData: BriefingData = {
 }
 
 function loadBriefing(): BriefingData {
-  try { const r = localStorage.getItem('briefing'); if (r) return { ...defaultData, ...JSON.parse(r) } } catch {}
+  try { const r = localStorage.getItem('briefing'); if (r) return { ...defaultData, ...JSON.parse(r) } } catch { /* noop */ }
   return defaultData
 }
 

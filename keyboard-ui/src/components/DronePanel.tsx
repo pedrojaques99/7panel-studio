@@ -523,6 +523,7 @@ function LayerCard({ layer, focused, seqStep, seqPlaying, analyser, onFocus, onU
 
 /* ── Export Section ──────────────────────────────────────────────── */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
   layers: LayerData[]; bpm: number; seqSteps?: never
 }) {
@@ -547,7 +548,7 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
           player.grainSize = layer.params.grainSize
           player.overlap = layer.params.overlap
           player.playbackRate = layer.params.playbackRate
-          player.detune = NOTE_CENTS[layer.activeNote ?? 'C4'] ?? 0
+          player.detune = (NOTE_CENTS as Record<string, number>)[layer.activeNote ?? 'C4'] ?? 0
           player.volume.value = Tone.gainToDb(layer.params.volume / 100)
           player.connect(reverb)
 
@@ -555,6 +556,7 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
             const stepsCopy = [...layer.seqSteps]
             Tone.getTransport().bpm.value = bpm
             let idx = 0
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             new Tone.Sequence((_time) => {
               const note = stepsCopy[idx % STEPS]
               if (note !== 'REST') player.detune = NOTE_CENTS[note] ?? 0
@@ -655,15 +657,16 @@ export function DronePanel({ onClose }: { onClose: () => void }) {
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!focusedId && layers.length > 0) setFocusedId(layers[0].id)
   }, [])
 
   function cleanupLayer(id: string) {
     const e = audioMap.current.get(id); if (!e) return
-    try { e.player.stop() } catch {}
-    try { e.player.dispose() } catch {}
-    try { e.reverb.dispose() } catch {}
-    try { e.analyser.dispose() } catch {}
+    try { e.player.stop() } catch { /* noop */ }
+    try { e.player.dispose() } catch { /* noop */ }
+    try { e.reverb.dispose() } catch { /* noop */ }
+    try { e.analyser.dispose() } catch { /* noop */ }
     audioMap.current.delete(id)
   }
 

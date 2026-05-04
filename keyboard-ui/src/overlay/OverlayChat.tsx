@@ -27,7 +27,7 @@ export function OverlayChat() {
           lastId.current = data[data.length - 1]?.id
           setMessages(data)
         }
-      } catch {}
+      } catch{ /* noop */ }
     }
     fetch_()
     const t = setInterval(fetch_, 3000)

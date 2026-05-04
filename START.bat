@@ -2,7 +2,7 @@
 title Mini Keyboard — Starting...
 
 echo [1/2] Starting Flask backend...
-start "Flask Backend" cmd /k "cd /d "%~dp0New English software is set in the upgrade model-20240908" && python dashboard_server.py"
+start "Flask Backend" cmd /k "cd /d "%~dp0backend" && python dashboard_server.py"
 
 timeout /t 2 /nobreak >nul
 

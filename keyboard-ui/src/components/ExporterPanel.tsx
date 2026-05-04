@@ -39,6 +39,7 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
       })
     })
     // seed initial selection with all available
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSources(captureRegistry.list())
     setSelected(new Set(captureRegistry.list().map(s => s.id)))
     return unsub
@@ -47,7 +48,7 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
   const toggleSource = (id: string) => {
     setSelected(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id); else next.add(id)
       return next
     })
   }

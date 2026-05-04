@@ -12,6 +12,7 @@ import { getSharedAudioContext, createCaptureDestination } from '../lib/audio-co
 
 export type { SbChannel }
 export type SoundKey = { id: string; label: string; emoji: string; src: string; color?: string }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type PlayMode = 'toggle'
 
 export type SbMix = {
@@ -35,7 +36,7 @@ function getSbCaptureStream(): MediaStream | null {
 function disconnectFromCapture(a: HTMLAudioElement) {
   const src = sbSourceMap.get(a)
   if (!src) return
-  try { src.disconnect() } catch {}
+  try { src.disconnect() } catch{ /* noop */ }
   sbSourceMap.delete(a)
 }
 
@@ -51,7 +52,7 @@ function connectToCapture(a: HTMLAudioElement) {
 
 /* ── Mix persistence ─────────────────────────────────────────────── */
 function loadMixes(): SbMix[] {
-  try { const r = localStorage.getItem('soundboard-mixes'); if (r) return JSON.parse(r) } catch {}
+  try { const r = localStorage.getItem('soundboard-mixes'); if (r) return JSON.parse(r) } catch{ /* noop */ }
   return []
 }
 function saveMixes(mixes: SbMix[]) {
@@ -68,7 +69,7 @@ function makeKey(): SoundKey {
 }
 
 function loadKeys(): SoundKey[] {
-  try { const r = localStorage.getItem('soundboard-keys'); if (r) return JSON.parse(r) } catch {}
+  try { const r = localStorage.getItem('soundboard-keys'); if (r) return JSON.parse(r) } catch{ /* noop */ }
   return [
     { id: crypto.randomUUID(), label: 'Sound 1', emoji: '🔈', src: '', color: '#00b860' },
     { id: crypto.randomUUID(), label: 'Sound 2', emoji: '🎵', src: '', color: '#3b82f6' },
@@ -361,6 +362,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   }, [])
 
   const keysRef = useRef(keys)
+  // eslint-disable-next-line react-hooks/refs
   keysRef.current = keys
   useEffect(() => {
     if (!onChannelChange) return
@@ -384,10 +386,10 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   }, [playingIds, keyStates])
 
   const setPlaying = (id: string, on: boolean) =>
-    setPlayingIds(prev => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n })
+    setPlayingIds(prev => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
 
   const setPaused = (id: string, on: boolean) =>
-    setPausedIds(prev => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n })
+    setPausedIds(prev => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
 
   const pauseKey = useCallback((id: string) => {
     const a = audioMap.current.get(id)
@@ -419,7 +421,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   }, [])
 
   const setLoading = (id: string, on: boolean) =>
-    setLoadingIds(prev => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n })
+    setLoadingIds(prev => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
 
   const playKey = useCallback(async (key: SoundKey, volume?: number) => {
     if (!key.src) return
@@ -558,7 +560,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
           const fresh = data.filter(m => !existingIds.has(m.id))
           return [...prev, ...fresh]
         })
-      } catch {}
+      } catch{ /* noop */ }
     }
     reader.readAsText(file)
     e.target.value = ''

@@ -81,7 +81,8 @@ export function LoopLabPanel({ onClose }: { onClose: () => void }) {
   const [isDrop, setIsDrop] = useState(false)
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState<false | 'wav' | 'render'>(false)
-  const [playProgress, setPlayProgress] = useState(0)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+const [_playProgress, setPlayProgress] = useState(0)
   const [loopIdx, setLoopIdx] = useState(0)
 
   // ── Refs ───────────────────────────────────────────────────────────
@@ -189,8 +190,8 @@ export function LoopLabPanel({ onClose }: { onClose: () => void }) {
   // ── Stop playback ──────────────────────────────────────────────────
   const stop = useCallback(() => {
     if (stopTimerRef.current) { clearTimeout(stopTimerRef.current); stopTimerRef.current = null }
-    if (playerRef.current) { try { playerRef.current.stop(); playerRef.current.dispose() } catch {} ; playerRef.current = null }
-    if (pitchRef.current) { try { pitchRef.current.dispose() } catch {} ; pitchRef.current = null }
+    if (playerRef.current) { try { playerRef.current.stop(); playerRef.current.dispose() } catch{ /* noop */ } ; playerRef.current = null }
+    if (pitchRef.current) { try { pitchRef.current.dispose() } catch{ /* noop */ } ; pitchRef.current = null }
     setIsPlaying(false)
     setPlayProgress(0)
     setLoopIdx(0)

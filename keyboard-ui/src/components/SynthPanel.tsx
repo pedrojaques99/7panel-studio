@@ -615,26 +615,26 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
 
   function disposePlayer() {
     const e = engineRef.current; if (!e || !e.player) return
-    try { e.player.stop() } catch {}
-    try { e.player.dispose() } catch {}
+    try { e.player.stop() } catch{ /* noop */ }
+    try { e.player.dispose() } catch{ /* noop */ }
     e.player = null
   }
 
   function disposeEngine() {
     const e = engineRef.current; if (!e) return
     disposePlayer()
-    try { e.polySynth.releaseAll() } catch {}
-    try { e.polySynth.dispose() } catch {}
-    try { e.fx.bitcrusher.dispose() } catch {}
-    try { e.fx.distortion.dispose() } catch {}
-    try { e.fx.chebyshev.dispose() } catch {}
-    try { e.fx.filter.dispose() } catch {}
-    try { e.fx.chorus.dispose() } catch {}
-    try { e.fx.phaser.dispose() } catch {}
-    try { e.fx.delay.dispose() } catch {}
-    try { e.fx.reverb.dispose() } catch {}
-    try { e.fx.analyser.dispose() } catch {}
-    try { synthOutputGain?.dispose() } catch {}
+    try { e.polySynth.releaseAll() } catch{ /* noop */ }
+    try { e.polySynth.dispose() } catch{ /* noop */ }
+    try { e.fx.bitcrusher.dispose() } catch{ /* noop */ }
+    try { e.fx.distortion.dispose() } catch{ /* noop */ }
+    try { e.fx.chebyshev.dispose() } catch{ /* noop */ }
+    try { e.fx.filter.dispose() } catch{ /* noop */ }
+    try { e.fx.chorus.dispose() } catch{ /* noop */ }
+    try { e.fx.phaser.dispose() } catch{ /* noop */ }
+    try { e.fx.delay.dispose() } catch{ /* noop */ }
+    try { e.fx.reverb.dispose() } catch{ /* noop */ }
+    try { e.fx.analyser.dispose() } catch{ /* noop */ }
+    try { synthOutputGain?.dispose() } catch{ /* noop */ }
     synthOutputGain = null
     engineRef.current = null
   }
@@ -781,7 +781,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
     setSeqPlaying(false)
     // release any sustained polysynth notes from the sequencer
     const e = engineRef.current
-    if (e) try { e.polySynth.releaseAll() } catch {}
+    if (e) try { e.polySynth.releaseAll() } catch{ /* noop */ }
     setActiveNotes(new Set())
   }
 
@@ -813,7 +813,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
         }, noteMs)
       } else {
         // PolySynth path: short attack/release
-        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch {}
+        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch{ /* noop */ }
         setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
         window.setTimeout(() => {
           setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
@@ -847,7 +847,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
         setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
         window.setTimeout(() => setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n }), noteMs)
       } else {
-        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch {}
+        try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000) } catch{ /* noop */ }
         setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
         window.setTimeout(() => setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n }), noteMs)
       }
@@ -1000,7 +1000,7 @@ export function SynthPanel({ onClose }: { onClose: () => void }) {
     const e = engineRef.current; if (!e) return
     // Drone mode keeps sustaining — only release polysynth notes
     if (e.player && statusRef.current === 'playing') return
-    try { e.polySynth.triggerRelease(noteName) } catch {}
+    try { e.polySynth.triggerRelease(noteName) } catch{ /* noop */ }
   }, [])
 
   /* Physical keyboard → noteOn/Off (sustain while held) */

@@ -98,7 +98,7 @@ export function ConfigPanel({ selected, config, onClose, onSaved }: Props) {
         if (file.name.endsWith('.ps1')) type = 'run_script'
         setActionType(type); setActionPath(res.path)
       }
-    } catch {}
+    } catch{ /* noop */ }
   }
 
   async function convertWav() {
@@ -120,7 +120,7 @@ export function ConfigPanel({ selected, config, onClose, onSaved }: Props) {
         else { await new Promise(r => setTimeout(r, 400)); return poll(jobId) }
       }
       await poll(res.job_id)
-    } catch (e: any) { setConvertStatus('err'); setConvertResult(String(e)) }
+    } catch (e: unknown) { setConvertStatus('err'); setConvertResult(String(e)) }
   }
 
   const btnBase: React.CSSProperties = {
@@ -158,7 +158,8 @@ export function ConfigPanel({ selected, config, onClose, onSaved }: Props) {
               <select
                 value={actionType}
                 onChange={e => setActionType(e.target.value)}
-                style={{ ...field, paddingRight: 36, appearance: 'none' as any }}
+                style={{ ...field, paddingRight: 36, // eslint-disable-next-line @typescript-eslint/no-explicit-any
+appearance: 'none' as any }}
                 onFocus={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'}
                 onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'}
               >

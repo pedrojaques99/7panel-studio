@@ -45,7 +45,7 @@ export function Overlay() {
         if (b) setBriefing(JSON.parse(b))
         const p = localStorage.getItem('overlay:pinned')
         if (p) setPinned(JSON.parse(p))
-      } catch {}
+      } catch{ /* noop */ }
     }
     read()
     window.addEventListener('storage', read)
@@ -63,7 +63,7 @@ export function Overlay() {
           lastMsgId.current = data[data.length - 1]?.id
           setMessages(data)
         }
-      } catch {}
+      } catch{ /* noop */ }
     }
     fetchMsgs()
     const t = setInterval(fetchMsgs, 3000)

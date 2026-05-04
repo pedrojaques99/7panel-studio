@@ -20,6 +20,7 @@ export function BpmControl({ bpm, onChange, min = 40, max = 300, accent = 'var(-
 
   // Sync display when external bpm changes and we're not editing
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!focused) setLocalVal(String(Math.round(bpm)))
   }, [bpm, focused])
 

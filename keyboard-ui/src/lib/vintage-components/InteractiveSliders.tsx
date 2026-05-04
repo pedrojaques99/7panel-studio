@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 export function InteractiveSliders({
   labels = ['63Hz', '125Hz', '250Hz', '500Hz', '1kHz', '2kHz']

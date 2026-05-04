@@ -66,6 +66,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
   // load assets when switching to files tab
   useEffect(() => {
     if (tab !== 'files') return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingAssets(true)
     fetch(`${API}/api/assets/list`)
       .then(r => r.json())

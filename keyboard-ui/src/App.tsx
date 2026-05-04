@@ -39,7 +39,8 @@ function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 }
 
-const ICON: Record<string, string> = {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _ICON: Record<string, string> = {
   play_audio: '🔈',
   open_app:   '🚀',
   run_script: '📜',
@@ -215,7 +216,7 @@ function AppInner() {
     try {
       await fetch(`${API}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
       setConfig(next)
-    } catch {}
+    } catch { /* ignore save errors */ }
     setCtxSaving(false)
     setCtxMenu(null)
   }
@@ -462,7 +463,8 @@ function AppInner() {
               {/* 3×4 key grid */}
               <div className="grid grid-cols-3" style={{ gap: 'var(--gap-standard)' }}>
                 {KEYS.map(key => {
-                  const action = config.buttons?.[key] || {} as any
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const action = config.buttons?.[key] || {} as any
                   const name = key.replace('key_', '').toUpperCase()
                   const isAudio = action.type === 'play_audio'
                   const isPlaying = playingKeys.has(key)
@@ -490,7 +492,7 @@ function AppInner() {
                       }}
                       className="aspect-square cursor-pointer select-none group"
                       style={{ width: 'var(--key-size)', padding: 8 }}
-                      // @ts-ignore drag handlers
+                      // @ts-expect-error drag handlers
                       onDragOver={(e: React.DragEvent) => { e.preventDefault(); setDragOver(key) }}
                       onDragLeave={() => setDragOver(null)}
                       onDrop={(e: React.DragEvent) => {
@@ -598,7 +600,7 @@ function AppInner() {
               onRegisterVolumer={(keyId, fn) => { deckVolumersRef.current[keyId] = fn }}
               onPlayStateChange={(keyId, playing) => setPlayingKeys(prev => {
                 const next = new Set(prev)
-                playing ? next.add(keyId) : next.delete(keyId)
+                if (playing) { next.add(keyId) } else { next.delete(keyId) }
                 return next
               })}
             />

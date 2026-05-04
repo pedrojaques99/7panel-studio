@@ -1,4 +1,4 @@
-import { loadGeo, type Geo } from './geo'
+import { type Geo } from './geo'
 
 export type PanelVisibility = {
   keys: boolean
@@ -48,7 +48,7 @@ export function capturePositions(): Record<string, Geo> {
   for (const key of GEO_KEYS) {
     const item = localStorage.getItem(`panel-geo-${key}`)
     if (item) {
-      try { positions[key] = JSON.parse(item) } catch {}
+      try { positions[key] = JSON.parse(item) } catch{ /* noop */ }
     }
   }
   return positions

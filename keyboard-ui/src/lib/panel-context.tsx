@@ -1,4 +1,5 @@
-import { createContext, useContext, useRef, useState, useEffect, type ReactNode } from 'react'
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
 
 const MIN_CANVAS_WIDTH = 1280
 const CANVAS_PADDING = 40
@@ -8,7 +9,8 @@ const SCALE_MIN = 0.05
 
 /** Scan saved panel geometries — design width must fit the rightmost panel
  *  edge so zooming never clips a panel out of the canvas. */
-function computeDesignWidth(): number {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _computeDesignWidth(): number {
   let maxRight = MIN_CANVAS_WIDTH
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)

@@ -20,7 +20,7 @@ const defaultConfig: TimerConfig = {
 }
 
 function loadConfig(): TimerConfig {
-  try { const r = localStorage.getItem('overlay:timer-config'); if (r) return { ...defaultConfig, ...JSON.parse(r) } } catch {}
+  try { const r = localStorage.getItem('overlay:timer-config'); if (r) return { ...defaultConfig, ...JSON.parse(r) } } catch{ /* noop */ }
   return defaultConfig
 }
 
@@ -67,6 +67,7 @@ export function TimerPanel({ onClose }: { onClose: () => void }) {
     const stopped = localStorage.getItem('overlay:timer-stopped')
     if (stored && !stopped) {
       startRef.current = Number(stored)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRunning(true)
     } else if (stopped) {
       setElapsed(Number(stopped))

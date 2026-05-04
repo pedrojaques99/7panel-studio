@@ -10,6 +10,7 @@ export function VintageMeter({
   const [displayValue, setDisplayValue] = useState(value);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayValue(value);
   }, [value]);
 

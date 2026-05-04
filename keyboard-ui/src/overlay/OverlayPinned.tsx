@@ -17,7 +17,7 @@ export function OverlayPinned() {
       try {
         const p = localStorage.getItem('overlay:pinned')
         if (p) setPinned(JSON.parse(p))
-      } catch {}
+      } catch{ /* noop */ }
     }
     read()
     window.addEventListener('storage', read)

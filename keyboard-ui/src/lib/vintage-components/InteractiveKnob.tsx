@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Knob from '../vintage-imports/Knob1';
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function InteractiveKnob({
   label = "BASS",
   min = 0,

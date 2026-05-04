@@ -137,7 +137,7 @@ function MockVisualizer({ volume }: { volume: number }) {
   const lastFrameRef = useRef<number>(0)
   const lastTickRef = useRef<number>(0)
   const volRef = useRef(volume)
-  volRef.current = volume
+  useEffect(() => { volRef.current = volume }, [volume])
   const N = 14
   const barsRef = useRef<number[]>(Array.from({ length: N }, () => 0.2 + Math.random() * 0.4))
   const targetRef = useRef<number[]>(Array.from({ length: N }, () => 0.2 + Math.random() * 0.4))
@@ -310,7 +310,8 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const streamUrlRef = useRef<string | null>(null)
   const [state, setState] = useState<DeckState>({ playing: false, currentTime: 0, duration: 0, volume: 80 })
-  const [resolving, setResolving] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [resolving, _setResolving] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editVal, setEditVal] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -322,7 +323,7 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
   const keyName = KEY_NAMES[keyId] ?? keyId
 
   const onStateChangeRef = useRef(onStateChange)
-  onStateChangeRef.current = onStateChange
+  useEffect(() => { onStateChangeRef.current = onStateChange }, [onStateChange])
   function emit(s: DeckState) { onStateChangeRef.current?.(keyId, s) }
 
   function makeAudio(src: string, cors = false) {
@@ -472,7 +473,8 @@ const SbStrip = React.memo(function SbStrip({ ch }: { ch: SbChannel }) {
 })
 
 // ─── Soundboard Deck (button mode only — strip is default) ────────────────────
-function SbDeck({ ch, buttonMode }: { ch: SbChannel; buttonMode: boolean }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _SbDeck({ ch, buttonMode }: { ch: SbChannel; buttonMode: boolean }) {
   if (buttonMode) {
     return (
       <button onClick={ch.stop} style={{
@@ -570,11 +572,14 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
   const localVols = useRef<Map<number, { v: number; expires: number }>>(new Map())
 
   // ── Soundtrack state ──
-  const [buttonMode, setButtonMode] = useState(() => localStorage.getItem('soundtrack-buttonmode') === 'true')
-  const [hiddenDecks, setHiddenDecks] = useState<string[]>(() => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [buttonMode, _setButtonMode] = useState(() => localStorage.getItem('soundtrack-buttonmode') === 'true')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [hiddenDecks, _setHiddenDecks] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('soundtrack-hidden') || '[]') } catch { return [] }
   })
-  const [hiddenExpanded, setHiddenExpanded] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_hiddenExpanded, _setHiddenExpanded] = useState(false)
   const [labels, setLabels] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('soundtrack-labels') || '{}') } catch { return {} }
   })
@@ -727,13 +732,17 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
 
   // ── Derived ──
   const allDecks = Object.entries(config.buttons ?? {}).filter(([, a]) => a.type === 'play_audio' && a.path)
-  const visibleDecks = allDecks.filter(([id]) => !hiddenDecks.includes(id))
-  const hiddenDeckItems = allDecks.filter(([id]) => hiddenDecks.includes(id))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _visibleDecks = allDecks.filter(([id]) => !hiddenDecks.includes(id))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _hiddenDeckItems = allDecks.filter(([id]) => hiddenDecks.includes(id))
   const visibleSessions = sessions.filter(s => !hiddenSys.includes(s.name))
   const hiddenSessionItems = sessions.filter(s => hiddenSys.includes(s.name))
 
-  const hasSoundtrack = allDecks.length > 0
-  const hasSystem = visibleSessions.length > 0 || sbChannels.length > 0
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _hasSoundtrack = allDecks.length > 0
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _hasSystem = visibleSessions.length > 0 || sbChannels.length > 0
 
   return (
     <CaptureIdContext.Provider value="soundtrack">

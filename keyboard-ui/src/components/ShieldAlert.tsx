@@ -49,7 +49,7 @@ export function ShieldAlert() {
       try {
         await obsRef.current.call('SetCurrentProgramScene', { sceneName: prevSceneRef.current })
         prevSceneRef.current = ''
-      } catch {}
+      } catch{ /* noop */ }
     }
   }, [obsMode])
 
@@ -71,7 +71,7 @@ export function ShieldAlert() {
           if (!data.alert && wasAlert) {
             releaseShield()
           }
-        } catch {}
+        } catch{ /* noop */ }
       }
       es.onerror = () => { es.close(); setTimeout(connect, 5000) }
     }
@@ -86,12 +86,13 @@ export function ShieldAlert() {
   }
 
   // Blackout overlay — covers this app window when OBS mode is off or OBS not connected
+  // eslint-disable-next-line react-hooks/refs
   const showBlackout = state.alert && !dismissed && (obsMode === 'blackout' || (obsMode === 'scene' && !obsReadyRef.current))
 
   return (
     <>
       {/* Full-screen blackout fallback */}
-      {showBlackout && (
+      {showBlackout && ( // eslint-disable-line react-hooks/refs
         <div
           style={{
             position: 'fixed', inset: 0, zIndex: 99998,
@@ -135,7 +136,7 @@ export function ShieldAlert() {
               <span style={{ fontFamily: 'monospace', background: 'rgba(0,0,0,0.35)', padding: '1px 7px', borderRadius: 4, fontSize: 'var(--fs-lg)' }}>
                 {state.pattern}
               </span>
-              {obsMode === 'scene' && obsReadyRef.current && (
+              {obsMode === 'scene' && obsReadyRef.current && ( // eslint-disable-line react-hooks/refs
                 <span style={{ marginLeft: 10, fontSize: 'var(--fs-md)', color: '#00b860', fontWeight: 600 }}>· OBS → {localStorage.getItem('obs-brb-scene') || 'Já Volto'}</span>
               )}
             </div>

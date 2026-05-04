@@ -16,7 +16,7 @@ const MOCK_BRIEFING: BriefingData = {
 
 const MOCK_TICKER: TickerConfig = {
   speed: 60, logoText: 'jaques', logoUrl: '', separator: '◆',
-  height: 40, bgOpacity: 72, fontSize: 'var(--fs-lg)', fontWeight: 500,
+  height: 40, bgOpacity: 72, fontSize: 14, fontWeight: 500,
   textColor: '#ffffffa6', accentColor: '#00b860', extraItems: '',
 }
 
@@ -48,7 +48,7 @@ export function OverlayBriefing() {
           const s = JSON.stringify(rt)
           if (s !== lastTRef.current) { lastTRef.current = s; setTk(p => ({ ...p, ...rt })); setTrackKey(k => k + 1) }
         }
-      } catch {}
+      } catch{ /* noop */ }
     }
     poll()
     const t = setInterval(poll, 500)

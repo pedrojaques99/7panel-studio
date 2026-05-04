@@ -30,7 +30,7 @@ export function OverlayTimer() {
         }
         if (data.stopped != null) setElapsed(data.stopped)
         else if (data.start) setElapsed(Math.floor((Date.now() - data.start) / 1000))
-      } catch {}
+      } catch{ /* noop */ }
     }
 
     // Tick locally for smooth display

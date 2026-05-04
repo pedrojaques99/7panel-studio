@@ -144,7 +144,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
           } else if (job.status === 'error') {
             stopPoll(); setStatus('error'); setErrMsg(job.error || 'Build failed')
           }
-        } catch {}
+        } catch{ /* noop */ }
       }, 700)
     } catch (e: unknown) {
       setStatus('error')

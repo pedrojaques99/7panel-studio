@@ -82,6 +82,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
   // fetch duration when urlInput changes (debounced)
   useEffect(() => {
     const serverPath = extractPath(urlInput.trim()) ?? urlInput.trim()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!serverPath) { setInputDuration(null); return }
     const timer = setTimeout(async () => {
       setDurationLoading(true)
