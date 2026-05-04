@@ -548,7 +548,8 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
           player.grainSize = layer.params.grainSize
           player.overlap = layer.params.overlap
           player.playbackRate = layer.params.playbackRate
-          player.detune = (NOTE_CENTS as Record<string, number>)[layer.activeNote ?? 'C4'] ?? 0
+          const activeKey = layer.activeNote ?? 'C4'
+          player.detune = activeKey !== 'REST' ? NOTE_CENTS[activeKey] ?? 0 : 0
           player.volume.value = Tone.gainToDb(layer.params.volume / 100)
           player.connect(reverb)
 
