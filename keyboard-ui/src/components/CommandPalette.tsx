@@ -28,7 +28,7 @@ function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (
 
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
-  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session'
+  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv'
 
 export type PanelDef = {
   id: PanelId
@@ -84,7 +84,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
   const GROUPS: { label: string; ids: PanelId[] }[] = [
     { label: 'Core',  ids: ['keys', 'mixer', 'soundboard'] },
     { label: 'Live',  ids: ['obs', 'ytchat', 'briefing', 'session', 'timer'] },
-    { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab'] },
+    { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab', 'visualizer'] },
     { label: 'Tools', ids: ['converter', 'exporter'] },
   ]
 

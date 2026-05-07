@@ -1100,6 +1100,50 @@ def shield_stream():
     )
 
 
+TV_MEDIA_FILE = os.path.join(os.path.dirname(__file__), "tv_media.json")
+
+def _load_tv_media():
+    if os.path.exists(TV_MEDIA_FILE):
+        with open(TV_MEDIA_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def _save_tv_media(items):
+    with open(TV_MEDIA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
+@app.route('/api/tv/media', methods=['GET'])
+def tv_media_list():
+    return jsonify(_load_tv_media())
+
+@app.route('/api/tv/media', methods=['POST'])
+def tv_media_save():
+    item = request.json
+    if not item or not item.get('url'):
+        return jsonify({"error": "url required"}), 400
+    items = _load_tv_media()
+    if any(i['url'] == item['url'] for i in items):
+        return jsonify({"status": "exists"})
+    items.append({
+        "url": item['url'],
+        "type": item.get('type', 'youtube'),
+        "title": item.get('title', ''),
+        "savedAt": item.get('savedAt', ''),
+    })
+    _save_tv_media(items)
+    return jsonify({"status": "saved"})
+
+@app.route('/api/tv/media', methods=['DELETE'])
+def tv_media_delete():
+    url = request.json.get('url') if request.json else None
+    if not url:
+        return jsonify({"error": "url required"}), 400
+    items = _load_tv_media()
+    items = [i for i in items if i['url'] != url]
+    _save_tv_media(items)
+    return jsonify({"status": "deleted"})
+
+
 if __name__ == '__main__':
     import socket, sys
     # Single-instance guard: se :5000 já está ocupada, sai limpo em vez de

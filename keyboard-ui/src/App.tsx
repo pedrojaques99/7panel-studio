@@ -15,6 +15,8 @@ import { ConverterPanel } from './components/ConverterPanel'
 import { LoopLabPanel } from './components/LoopLabPanel'
 import { SessionPanel } from './components/SessionPanel'
 import { ConfigPanel } from './components/ConfigPanel'
+import { VisualizerPanel } from './components/VisualizerPanel'
+import { RetroTVPanel } from './components/RetroTVPanel'
 import { CommandPalette, type PanelDef, type PanelId } from './components/CommandPalette'
 import { ShieldAlert } from './components/ShieldAlert'
 import { API } from './lib/api'
@@ -89,6 +91,8 @@ function AppInner() {
   const [showConverter, setShowConverter] = useState(() => localStorage.getItem('panel-converter') === 'true')
   const [showLoopLab, setShowLoopLab] = useState(() => localStorage.getItem('panel-looplab') === 'true')
   const [showSession, setShowSession] = useState(() => localStorage.getItem('panel-session') === 'true')
+  const [showVisualizer, setShowVisualizer] = useState(() => localStorage.getItem('panel-visualizer') === 'true')
+  const [showRetroTV, setShowRetroTV] = useState(() => localStorage.getItem('panel-retrotv') === 'true')
   const deckTogglersRef = useRef<Record<string, () => void>>({})
   const deckSyncersRef = useRef<Record<string, (forcePlaying?: boolean) => void>>({})
   const deckVolumersRef = useRef<Record<string, (v: number) => void>>({})
@@ -142,6 +146,8 @@ function AppInner() {
   useEffect(() => { localStorage.setItem('panel-converter', String(showConverter)) }, [showConverter])
   useEffect(() => { localStorage.setItem('panel-looplab', String(showLoopLab)) }, [showLoopLab])
   useEffect(() => { localStorage.setItem('panel-session', String(showSession)) }, [showSession])
+  useEffect(() => { localStorage.setItem('panel-visualizer', String(showVisualizer)) }, [showVisualizer])
+  useEffect(() => { localStorage.setItem('panel-retrotv', String(showRetroTV)) }, [showRetroTV])
 
   /* ── Physical keyboard bridge: long-poll Flask, pausa em background ── */
   useEffect(() => {
@@ -206,7 +212,7 @@ function AppInner() {
       keys: setShowKeys, mixer: setShowMixer, soundboard: setShowSoundboard,
       obs: setShowOBS, briefing: setShowBriefing, ytchat: setShowYTChat,
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, synth: setShowSynth,
-      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, session: setShowSession,
+      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV,
     }
     setters[id]?.(v => !v)
   }
@@ -275,6 +281,7 @@ function AppInner() {
     setShowConverter(v.converter ?? false)
     setShowLoopLab(v.looplab ?? false)
     setShowSession(v.session ?? false)
+    setShowRetroTV((v as Record<string,boolean>).retrotv ?? false)
     applyPositions(preset.positions)
     if (preset.scale && transformRef.current) {
       transformRef.current.setTransform(0, 0, preset.scale)
@@ -300,8 +307,10 @@ function AppInner() {
     { id: 'looplab',    label: 'Loop Lab',       icon: '🔁', sidebar: isSidebarVisible('looplab', false),    visible: showLoopLab },
     { id: 'converter',  label: 'Converter',      icon: '⇄',  sidebar: isSidebarVisible('converter', false),  visible: showConverter },
     { id: 'exporter',   label: 'Exporter',       icon: '⏺',  sidebar: isSidebarVisible('exporter', false),   visible: showExporter },
+    { id: 'visualizer', label: 'Visualizer',     icon: '🌀', sidebar: isSidebarVisible('visualizer', false), visible: showVisualizer },
+    { id: 'retrotv',    label: 'Retro TV',       icon: '📺', sidebar: isSidebarVisible('retrotv', true),      visible: showRetroTV },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showSession, sidebarConfig])
+  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showSession, showVisualizer, showRetroTV, sidebarConfig])
 
   /* ── Figma-like cursors ── */
   useEffect(() => {
@@ -317,45 +326,100 @@ function AppInner() {
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
   }, [])
 
-  /* ── Figma-style wheel: scroll=pan Y, shift+scroll=pan X, ctrl+scroll=zoom ── */
+  /* ── Adaptive wheel: zoom-aware speed, burst detection, gentle inertia ── */
   const canvasRef = useRef<HTMLElement>(null)
+  const velRef = useRef({ x: 0, y: 0 })
+  const inertiaRef = useRef(0)
+  const scrollHistRef = useRef<number[]>([])
 
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
 
+    const FRICTION = 0.78
+    const MIN_VEL = 0.2
+
+    const tickInertia = () => {
+      const v = velRef.current
+      if (!transformRef.current) return
+      const { state } = transformRef.current
+      if (Math.abs(v.x) < MIN_VEL && Math.abs(v.y) < MIN_VEL) {
+        v.x = 0; v.y = 0
+        return
+      }
+      v.x *= FRICTION; v.y *= FRICTION
+      transformRef.current.setTransform(
+        state.positionX + v.x,
+        state.positionY + v.y,
+        state.scale,
+        0,
+      )
+      inertiaRef.current = requestAnimationFrame(tickInertia)
+    }
+
+    const getScrollIntensity = () => {
+      const now = performance.now()
+      const hist = scrollHistRef.current
+      hist.push(now)
+      while (hist.length > 0 && now - hist[0] > 300) hist.shift()
+      const eventsPerSec = hist.length / 0.3
+      if (eventsPerSec > 25) return 1.8
+      if (eventsPerSec > 12) return 1.2
+      return 0.7
+    }
+
     const handleCanvasWheel = (e: WheelEvent) => {
       if (!transformRef.current) return
-      const { setTransform, zoomIn, zoomOut, state } = transformRef.current
+      e.preventDefault()
+      const { state } = transformRef.current
 
       if (e.ctrlKey || e.metaKey) {
-        e.preventDefault()
-        if (e.deltaY < 0) zoomIn(0.15)
-        else zoomOut(0.15)
+        const rect = el.getBoundingClientRect()
+        const cursorX = e.clientX - rect.left
+        const cursorY = e.clientY - rect.top
+        const ZOOM_SENSITIVITY = 0.005
+        const factor = Math.pow(2, -e.deltaY * ZOOM_SENSITIVITY)
+        const newScale = Math.min(5, Math.max(0.05, state.scale * factor))
+        const ratio = newScale / state.scale
+        const newX = cursorX - ratio * (cursorX - state.positionX)
+        const newY = cursorY - ratio * (cursorY - state.positionY)
+        transformRef.current.setTransform(newX, newY, newScale, 0)
         return
       }
 
-      e.preventDefault()
-      const PAN_SPEED = 1.2
-      let dx = 0
-      let dy = 0
+      cancelAnimationFrame(inertiaRef.current)
 
+      const intensity = getScrollIntensity()
+      const zoomFactor = 1 / Math.max(0.3, state.scale)
+      const speed = 0.5 * intensity * zoomFactor
+
+      const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
+      const maxD = 25 + intensity * 15
+      const dX = clamp(e.deltaX, maxD)
+      const dY = clamp(e.deltaY, maxD)
+
+      let dx: number, dy: number
       if (e.shiftKey) {
-        dx = -e.deltaY * PAN_SPEED
+        dx = -dY * speed; dy = 0
       } else {
-        dx = -e.deltaX * PAN_SPEED
-        dy = -e.deltaY * PAN_SPEED
+        dx = -dX * speed; dy = -dY * speed
       }
 
-      setTransform(
+      velRef.current = { x: dx * 0.4, y: dy * 0.4 }
+      transformRef.current.setTransform(
         state.positionX + dx,
         state.positionY + dy,
         state.scale,
+        0,
       )
+      inertiaRef.current = requestAnimationFrame(tickInertia)
     }
 
     el.addEventListener('wheel', handleCanvasWheel, { passive: false })
-    return () => el.removeEventListener('wheel', handleCanvasWheel)
+    return () => {
+      el.removeEventListener('wheel', handleCanvasWheel)
+      cancelAnimationFrame(inertiaRef.current)
+    }
   }, [])
 
   return (
@@ -418,7 +482,6 @@ function AppInner() {
           initialScale={scale}
           minScale={0.05}
           maxScale={5}
-          smooth={false}
           centerOnInit={false}
           limitToBounds={false}
           disabled={showPalette}
@@ -428,10 +491,10 @@ function AppInner() {
             activationKeys: [' '],
             disabled: false,
             allowLeftClickPan: true,
-            velocityDisabled: false
+            velocityDisabled: true,
           }}
           wheel={{ disabled: true }}
-          pinch={{ disabled: false }}
+          pinch={{ disabled: false, step: 5 }}
         >
           {({ zoomIn, zoomOut, resetTransform, state }) => (
             <>
@@ -442,6 +505,15 @@ function AppInner() {
                 <span>[Ctrl+Scroll] Zoom</span>
                 <span>[Space] Drag</span>
               </div>
+
+              {/* Home button */}
+              <a
+                href="http://localhost:4000/launcher.html"
+                className="fixed top-4 left-4 z-[100] w-10 h-10 flex items-center justify-center rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl hover:bg-white/10 transition-all text-white/40 hover:text-white"
+                title="Back to Launcher"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              </a>
 
               {/* Floating UI controls for Zoom/Pan */}
               <div className="fixed bottom-6 left-[96px] z-[100] flex items-center gap-3 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl">
@@ -671,6 +743,8 @@ const action = config.buttons?.[key] || {} as any
         {showConverter && <ConverterPanel onClose={() => setShowConverter(false)} />}
         {showLoopLab && <LoopLabPanel onClose={() => setShowLoopLab(false)} />}
         {showSession && <SessionPanel onClose={() => setShowSession(false)} />}
+        {showVisualizer && <VisualizerPanel onClose={() => setShowVisualizer(false)} />}
+        {showRetroTV && <RetroTVPanel onClose={() => setShowRetroTV(false)} />}
 
                 </div>
               </TransformComponent>
@@ -680,7 +754,7 @@ const action = config.buttons?.[key] || {} as any
 
         {/* Floating preset button — fixed bottom-right, outside canvas scale */}
         <PresetFloating
-          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, session: showSession }}
+          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, session: showSession, visualizer: showVisualizer, retrotv: showRetroTV }}
           scale={scale}
           onLoad={loadPreset}
         />

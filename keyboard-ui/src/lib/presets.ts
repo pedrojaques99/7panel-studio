@@ -15,6 +15,8 @@ export type PanelVisibility = {
   converter: boolean
   looplab: boolean
   session: boolean
+  visualizer: boolean
+  retrotv: boolean
 }
 
 export type Preset = {
@@ -26,7 +28,7 @@ export type Preset = {
   savedAt: number
 }
 
-const GEO_KEYS = ['keyboard', 'config', 'mixer', 'soundboard', 'obs', 'briefing', 'ytchat', 'timer', 'drone', 'paul', 'synth', 'exporter', 'converter', 'looplab', 'session'] as const
+const GEO_KEYS = ['keyboard', 'config', 'mixer', 'soundboard', 'obs', 'briefing', 'ytchat', 'timer', 'drone', 'paul', 'synth', 'exporter', 'converter', 'looplab', 'session', 'visualizer', 'retrotv'] as const
 
 const STORAGE_KEY = 'panel-presets'
 const MAX_PRESETS = 8
@@ -69,6 +71,8 @@ export function autoName(vis: PanelVisibility): string {
   if (vis.converter) labels.push('Conv')
   if (vis.looplab) labels.push('Loop')
   if (vis.session) labels.push('Session')
+  if (vis.visualizer) labels.push('Vis')
+  if (vis.retrotv) labels.push('TV')
   if (vis.keys) labels.push('Keys')
   if (labels.length === 0) return 'Empty'
   if (labels.length <= 2) return labels.join(' + ')

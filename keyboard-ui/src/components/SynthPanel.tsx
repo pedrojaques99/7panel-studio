@@ -40,10 +40,11 @@ function crushWet(bits: number): number {
 const KNOB_NATIVE = { w: 81, h: 75 }
 
 function SynthKnob({
-  label, value, min, max, size = 64, fmt, accent = '#00b860', onChange,
+  label, value, min, max, size = 64, fmt, accent = '#00b860', log, genLocked, onRightClick, onChange,
 }: {
   label: string; value: number; min: number; max: number; size?: number
-  fmt?: (v: number) => string; accent?: string; onChange: (v: number) => void
+  fmt?: (v: number) => string; accent?: string; log?: boolean
+  genLocked?: boolean; onRightClick?: () => void; onChange: (v: number) => void
 }) {
   const [drag, setDrag] = useState(false)
   const [hover, setHover] = useState(false)
@@ -52,7 +53,13 @@ function SynthKnob({
   const shiftRef = useRef(false)
   const sc = size / KNOB_NATIVE.w
   const scaledH = Math.round(KNOB_NATIVE.h * sc)
-  const rotation = -135 + ((value - min) / (max - min)) * 270
+  const toNorm = (v: number) => log
+    ? (Math.log(v / min)) / (Math.log(max / min))
+    : (v - min) / (max - min)
+  const fromNorm = (n: number) => log
+    ? min * Math.pow(max / min, n)
+    : min + n * (max - min)
+  const rotation = -135 + toNorm(value) * 270
   const clamp = (v: number) => Math.max(min, Math.min(max, v))
 
   useEffect(() => {
@@ -62,7 +69,8 @@ function SynthKnob({
       lastY.current = e.clientY
       shiftRef.current = e.shiftKey
       const sensitivity = e.shiftKey ? 0.004 : 0.022
-      onChange(clamp(value + dy * sensitivity * (max - min)))
+      const norm = toNorm(value) + dy * sensitivity
+      onChange(clamp(fromNorm(Math.max(0, Math.min(1, norm)))))
     }
     const onUp = () => setDrag(false)
     document.addEventListener('mousemove', onMove)
@@ -77,19 +85,18 @@ function SynthKnob({
     if (!e.ctrlKey && !e.metaKey) return
     e.preventDefault(); e.stopPropagation()
     const sensitivity = e.shiftKey ? 0.002 : 0.012
-    const delta = (e.deltaY < 0 ? 1 : -1) * sensitivity * (max - min)
-    onChange(clamp(value + delta))
+    const norm = toNorm(value) + (e.deltaY < 0 ? 1 : -1) * sensitivity
+    onChange(clamp(fromNorm(Math.max(0, Math.min(1, norm)))))
   }
 
-  const onDoubleClick = () => onChange((min + max) / 2)
+  const onDoubleClick = () => onChange(fromNorm(0.5))
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
-    // right-click: random nudge — no shift = light, shift = medium, ctrl+shift = hard
-    const range = max - min
+    if (onRightClick) { onRightClick(); return }
     const spread = e.ctrlKey && e.shiftKey ? 0.8 : e.shiftKey ? 0.4 : 0.15
-    const nudge = (Math.random() - 0.5) * 2 * spread * range
-    onChange(clamp(value + nudge))
+    const nudge = (Math.random() - 0.5) * 2 * spread
+    onChange(clamp(fromNorm(Math.max(0, Math.min(1, toNorm(value) + nudge)))))
     setFlash(true); setTimeout(() => setFlash(false), 200)
   }
 
@@ -119,7 +126,7 @@ function SynthKnob({
           <Knob rotation={rotation} />
         </div>
       </div>
-      <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: hover ? 'var(--text-60)' : 'var(--text-40)', textTransform: 'uppercase', transition: 'color 0.15s' }}>{label}</span>
+      <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: genLocked ? 'rgba(239,68,68,0.6)' : hover ? 'var(--text-60)' : 'var(--text-40)', textTransform: 'uppercase', transition: 'color 0.15s', textDecoration: genLocked ? 'line-through' : 'none' }}>{label}</span>
       <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', color: accent, marginTop: -2 }}>
         {fmt ? fmt(value) : value.toFixed(2)}
       </span>
@@ -624,6 +631,84 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Generative drift
+  const [genActive, setGenActive] = useState(false)
+  const [genExclude, setGenExclude] = useState<Set<keyof FxParams>>(new Set(['vol']))
+  const genRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const toggleGenParam = (key: keyof FxParams) => setGenExclude(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    return next
+  })
+
+  const genExcludeRef = useRef(genExclude)
+  genExcludeRef.current = genExclude
+
+  useEffect(() => {
+    if (!genActive) {
+      if (genRef.current) { clearInterval(genRef.current); genRef.current = null }
+      return
+    }
+    const drift = () => {
+      const skip = genExcludeRef.current
+      setFx(prev => {
+        const nudge = (k: keyof FxParams, v: number, lo: number, hi: number, strength = 0.04) => {
+          if (skip.has(k)) return v
+          const range = hi - lo
+          const d = (Math.random() - 0.5) * 2 * strength * range
+          return Math.max(lo, Math.min(hi, v + d))
+        }
+        const nudgeLog = (k: keyof FxParams, v: number, lo: number, hi: number, strength = 0.04) => {
+          if (skip.has(k)) return v
+          const logV = Math.log(v)
+          const logLo = Math.log(lo)
+          const logHi = Math.log(hi)
+          const d = (Math.random() - 0.5) * 2 * strength * (logHi - logLo)
+          return Math.max(lo, Math.min(hi, Math.exp(logV + d)))
+        }
+        const next: FxParams = {
+          ...prev,
+          drive: nudge('drive', prev.drive, 0, 0.5, 0.03),
+          bite: Math.round(nudge('bite', prev.bite, 1, 18, 0.05)),
+          cutoff: nudgeLog('cutoff', prev.cutoff, 400, 15000, 0.02),
+          resonance: nudge('resonance', prev.resonance, 0, 8, 0.03),
+          paul: nudge('paul', prev.paul, 0.1, 1.2, 0.04),
+          rate: nudgeLog('rate', prev.rate, 0.15, 1.5, 0.03),
+          reverbWet: nudge('reverbWet', prev.reverbWet, 0.1, 0.9, 0.03),
+          reverbDecay: nudge('reverbDecay', prev.reverbDecay, 2, 24, 0.025),
+          chorus: prev.chorus > 0 ? nudge('chorus', prev.chorus, 0.05, 0.85, 0.03) : 0,
+          phaser: prev.phaser > 0 ? nudge('phaser', prev.phaser, 0.05, 0.7, 0.03) : 0,
+          delay: prev.delay > 0 ? nudge('delay', prev.delay, 0.05, 0.6, 0.025) : 0,
+          delayTime: prev.delay > 0 ? nudgeLog('delayTime', prev.delayTime, 0.1, 1.2, 0.02) : prev.delayTime,
+          delayFb: prev.delay > 0 ? nudge('delayFb', prev.delayFb, 0.15, 0.7, 0.02) : prev.delayFb,
+          vol: prev.vol,
+          crush: prev.crush < 12 ? Math.round(nudge('crush', prev.crush, 4, 10, 0.03)) : 12,
+        }
+        const e = engineRef.current
+        if (e) {
+          e.fx.distortion.distortion = next.drive
+          e.fx.chebyshev.order = Math.max(1, next.bite)
+          e.fx.filter.frequency.rampTo(next.cutoff, 1.5)
+          e.fx.filter.Q.rampTo(next.resonance, 0.8)
+          e.fx.reverb.wet.rampTo(next.reverbWet, 0.8)
+          e.fx.chorus.wet.rampTo(next.chorus, 0.8)
+          e.fx.phaser.wet.rampTo(next.phaser, 0.8)
+          e.fx.delay.wet.rampTo(next.delay, 0.8)
+          e.fx.delay.delayTime.rampTo(next.delayTime, 0.8)
+          e.fx.delay.feedback.rampTo(next.delayFb, 0.8)
+          if (e.player) {
+            e.player.grainSize = next.paul
+            e.player.overlap = Math.min(0.5, next.paul * 0.55)
+            e.player.playbackRate = next.rate
+          }
+        }
+        return next
+      })
+    }
+    genRef.current = setInterval(drift, 800 + Math.random() * 400)
+    return () => { if (genRef.current) clearInterval(genRef.current) }
+  }, [genActive])
+
   // Presets
   const [userPresets, setUserPresets] = useState<SynthPreset[]>(loadUserPresets)
   const [showPresets, setShowPresets] = useState(false)
@@ -795,7 +880,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       if (e) {
         if (patch.drive !== undefined) e.fx.distortion.distortion = patch.drive
         if (patch.bite !== undefined) e.fx.chebyshev.order = Math.max(1, Math.round(patch.bite))
-        if (patch.cutoff !== undefined) e.fx.filter.frequency.rampTo(patch.cutoff, 0.05)
+        if (patch.cutoff !== undefined) e.fx.filter.frequency.rampTo(patch.cutoff, 0.3)
         if (patch.resonance !== undefined) e.fx.filter.Q.value = patch.resonance
         if (patch.reverbWet !== undefined) e.fx.reverb.wet.rampTo(patch.reverbWet, 0.05)
         if (patch.crush !== undefined) {
@@ -1205,12 +1290,14 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     else { e.player.start(); setStatus('playing') }
   }
 
+  const pendingRelease = useRef(new Set<string>())
+
   const noteOn = useCallback(async (noteName: string, cents: number) => {
     setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
+    pendingRelease.current.delete(noteName)
     freestyleNoteOn(noteName)
     const e = await ensureEngine()
     if (e.player) {
-      // Auto-start drone if sample is loaded but not playing yet
       if (statusRef.current !== 'playing') {
         try { e.player.start(); setStatus('playing') } catch { /* noop */ }
       }
@@ -1218,12 +1305,17 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       return
     }
     try { e.polySynth.triggerAttack(noteName) } catch (err) { console.warn('synth attack err', err) }
+    if (pendingRelease.current.has(noteName)) {
+      pendingRelease.current.delete(noteName)
+      try { e.polySynth.triggerRelease(noteName) } catch { /* noop */ }
+    }
   }, [])
 
   const noteOff = useCallback((noteName: string) => {
     setActiveNotes(prev => { const n = new Set(prev); n.delete(noteName); return n })
     freestyleNoteOff(noteName)
-    const e = engineRef.current; if (!e) return
+    const e = engineRef.current
+    if (!e) { pendingRelease.current.add(noteName); return }
     if (e.player && statusRef.current === 'playing') return
     try { e.polySynth.triggerRelease(noteName) } catch{ /* noop */ }
   }, [])
@@ -1310,6 +1402,16 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 letterSpacing: '0.15em',
               }}>
               🎲 RND
+            </button>
+            <button onClick={() => setGenActive(g => !g)}
+              title="Generative drift — subtle evolving parameter variation"
+              style={{
+                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: genActive ? 'rgba(16,185,129,0.55)' : 'rgba(255,255,255,0.06)',
+                color: genActive ? '#fff' : 'var(--text-40)',
+                letterSpacing: '0.15em',
+              }}>
+              ◎ GEN
             </button>
             <button onClick={togglePaulMode}
               style={{
@@ -1408,45 +1510,63 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         }}>
           {/* Row 1 — drive / shape / filter / paul / vol */}
           <SynthKnob label="DRIVE" value={fx.drive} min={0} max={1} accent="#ef4444"
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ drive: v })} />
+            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ drive: v })}
+            genLocked={genActive && genExclude.has('drive')} onRightClick={genActive ? () => toggleGenParam('drive') : undefined} />
           <SynthKnob label="BITE" value={fx.bite} min={1} max={50} accent="#f59e0b"
-            fmt={v => String(Math.round(v))} onChange={v => updateFx({ bite: v })} />
+            fmt={v => String(Math.round(v))} onChange={v => updateFx({ bite: v })}
+            genLocked={genActive && genExclude.has('bite')} onRightClick={genActive ? () => toggleGenParam('bite') : undefined} />
           <SynthKnob label="CRUSH" value={fx.crush} min={4} max={12} accent="#fb923c"
-            fmt={v => v >= 12 ? '—' : `${Math.round(v)}b`} onChange={v => updateFx({ crush: v })} />
-          <SynthKnob label="CUTOFF" value={fx.cutoff} min={400} max={18000} accent="#06b6d4"
+            fmt={v => v >= 12 ? '—' : `${Math.round(v)}b`} onChange={v => updateFx({ crush: v })}
+            genLocked={genActive && genExclude.has('crush')} onRightClick={genActive ? () => toggleGenParam('crush') : undefined} />
+          <SynthKnob label="CUTOFF" value={fx.cutoff} min={400} max={18000} accent="#06b6d4" log
             fmt={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`}
-            onChange={v => updateFx({ cutoff: v })} />
+            onChange={v => updateFx({ cutoff: v })}
+            genLocked={genActive && genExclude.has('cutoff')} onRightClick={genActive ? () => toggleGenParam('cutoff') : undefined} />
           <SynthKnob label="PAUL" value={fx.paul} min={0.05} max={1.5} accent="#a78bfa"
-            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ paul: v })} />
+            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ paul: v })}
+            genLocked={genActive && genExclude.has('paul')} onRightClick={genActive ? () => toggleGenParam('paul') : undefined} />
 
           {/* Row 2 — atmospheric */}
           <SynthKnob label="CHORUS" value={fx.chorus} min={0} max={1} accent="#34d399"
             fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ chorus: v })} />
+            onChange={v => updateFx({ chorus: v })}
+            genLocked={genActive && genExclude.has('chorus')} onRightClick={genActive ? () => toggleGenParam('chorus') : undefined} />
           <SynthKnob label="PHASER" value={fx.phaser} min={0} max={1} accent="#c084fc"
             fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ phaser: v })} />
+            onChange={v => updateFx({ phaser: v })}
+            genLocked={genActive && genExclude.has('phaser')} onRightClick={genActive ? () => toggleGenParam('phaser') : undefined} />
           <SynthKnob label="DELAY" value={fx.delay} min={0} max={1} accent="#facc15"
             fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ delay: v })} />
+            onChange={v => updateFx({ delay: v })}
+            genLocked={genActive && genExclude.has('delay')} onRightClick={genActive ? () => toggleGenParam('delay') : undefined} />
           <SynthKnob label="REVERB" value={fx.reverbWet} min={0} max={1} accent="#3b82f6"
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ reverbWet: v })} />
+            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ reverbWet: v })}
+            genLocked={genActive && genExclude.has('reverbWet')} onRightClick={genActive ? () => toggleGenParam('reverbWet') : undefined} />
           <SynthKnob label="VOL" value={fx.vol} min={0} max={1} accent={accent}
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ vol: v })} />
+            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ vol: v })}
+            genLocked={genActive && genExclude.has('vol')} onRightClick={genActive ? () => toggleGenParam('vol') : undefined} />
         </div>
 
-        {/* Secondary sliders */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
-          <MiniSlider label="RES" value={fx.resonance} min={0} max={20} step={0.1}
-            fmt={v => v.toFixed(1)} onChange={v => updateFx({ resonance: v })} />
-          <MiniSlider label="RATE" value={fx.rate} min={0.05} max={2} step={0.01}
-            fmt={v => `${v.toFixed(2)}×`} onChange={v => updateFx({ rate: v })} />
-          <MiniSlider label="DECAY" value={fx.reverbDecay} min={0.5} max={30} step={0.5}
-            fmt={v => `${v.toFixed(1)}s`} onChange={v => updateFx({ reverbDecay: v })} />
-          <MiniSlider label="DLY TIME" value={fx.delayTime} min={0.05} max={1.5} step={0.01}
-            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ delayTime: v })} />
-          <MiniSlider label="DLY FB" value={fx.delayFb} min={0} max={0.95} step={0.01}
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ delayFb: v })} />
+        {/* Secondary knobs */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, rowGap: 12,
+          padding: '10px 8px 8px',
+        }}>
+          <SynthKnob label="RES" value={fx.resonance} min={0} max={20} accent="#22d3ee"
+            fmt={v => v.toFixed(1)} onChange={v => updateFx({ resonance: v })}
+            genLocked={genActive && genExclude.has('resonance')} onRightClick={genActive ? () => toggleGenParam('resonance') : undefined} />
+          <SynthKnob label="RATE" value={fx.rate} min={0.05} max={2} accent="#a78bfa" log
+            fmt={v => `${v.toFixed(2)}×`} onChange={v => updateFx({ rate: v })}
+            genLocked={genActive && genExclude.has('rate')} onRightClick={genActive ? () => toggleGenParam('rate') : undefined} />
+          <SynthKnob label="DECAY" value={fx.reverbDecay} min={0.5} max={30} accent="#3b82f6"
+            fmt={v => `${v.toFixed(1)}s`} onChange={v => updateFx({ reverbDecay: v })}
+            genLocked={genActive && genExclude.has('reverbDecay')} onRightClick={genActive ? () => toggleGenParam('reverbDecay') : undefined} />
+          <SynthKnob label="DLY T" value={fx.delayTime} min={0.05} max={1.5} accent="#facc15" log
+            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ delayTime: v })}
+            genLocked={genActive && genExclude.has('delayTime')} onRightClick={genActive ? () => toggleGenParam('delayTime') : undefined} />
+          <SynthKnob label="DLY FB" value={fx.delayFb} min={0} max={0.95} accent="#fb923c"
+            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ delayFb: v })}
+            genLocked={genActive && genExclude.has('delayFb')} onRightClick={genActive ? () => toggleGenParam('delayFb') : undefined} />
         </div>
 
         {/* Sequencer bar */}
@@ -1538,7 +1658,10 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
               gate {seqGate < 1 ? `${Math.round(seqGate * 100)}%` : seqGate === 1 ? 'tie' : `${seqGate.toFixed(1)}×`}
             </span>
             <input type="range" min={0.05} max={1.5} step={0.01} value={seqGate}
-              onChange={e => setSeqGate(Number(e.target.value))}
+              onChange={e => {
+                const v = Number(e.target.value)
+                setSeqGate(Math.abs(v - 1) < 0.04 ? 1 : v)
+              }}
               style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 50 }}
               title="Gate: <1 silent gap · 1 tie · >1 legato overlap" />
           </div>

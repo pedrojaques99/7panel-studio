@@ -1,40 +1,26 @@
 import svgPaths from "./svg-3qj1ipvk3n";
 
-function Labels() {
-  return (
-    <div className="absolute contents font-['Red_Hat_Mono:Regular',sans-serif] font-normal leading-[5.869px] left-[12.63px] text-[4.695px] text-center text-white top-[5.87px]" data-name="Labels">
-      <p className="-translate-x-1/2 absolute left-[39.95px] opacity-90 top-[5.87px] whitespace-nowrap">0</p>
-      <p className="-translate-x-1/2 absolute h-[7.043px] left-[54.3px] opacity-90 top-[9.4px] w-[3.521px]">1</p>
-      <p className="-translate-x-1/2 absolute h-[7.043px] left-[26.71px] opacity-90 top-[9.4px] w-[4.695px]">1</p>
-      <p className="-translate-x-1/2 absolute h-[5.869px] left-[63.69px] opacity-90 top-[19.96px] w-[3.521px]">2</p>
-      <p className="-translate-x-1/2 absolute h-[5.869px] left-[16.73px] opacity-90 top-[19.96px] w-[3.521px]">2</p>
-      <p className="-translate-x-1/2 absolute left-[66.95px] opacity-90 top-[34.05px] whitespace-nowrap">3</p>
-      <p className="-translate-x-1/2 absolute left-[14.13px] opacity-90 top-[34.05px] whitespace-nowrap">3</p>
-      <p className="-translate-x-1/2 absolute left-[63.69px] opacity-90 top-[46.96px] w-[3.521px]">4</p>
-      <p className="-translate-x-1/2 absolute left-[17.65px] opacity-90 top-[46.96px] whitespace-nowrap">4</p>
-      <p className="-translate-x-1/2 absolute left-[54.04px] opacity-90 top-[57.52px] whitespace-nowrap">5</p>
-      <p className="-translate-x-1/2 absolute left-[27.04px] opacity-90 top-[57.52px] whitespace-nowrap">5</p>
-    </div>
-  );
-}
-
 function Marks() {
+  const cx = 40.5, cy = 37.5, r = 32
+  const angles = Array.from({ length: 11 }, (_, i) => -135 + i * 27)
   return (
-    <div className="absolute contents left-[12.63px] top-[5.87px]" data-name="Marks">
-      <div className="absolute inset-[17.25%_16.69%_23.1%_22.7%]" data-name="Marks">
-        <svg className="absolute block inset-0 size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 46.6488 44.1417">
-          <path d={svgPaths.p31917400} fill="var(--fill-0, white)" id="Marks" />
-        </svg>
-      </div>
-      <Labels />
-    </div>
-  );
+    <svg className="absolute inset-0 size-full" fill="none" viewBox="0 0 81 75" style={{ pointerEvents: 'none' }}>
+      {angles.map((deg, i) => {
+        const rad = (deg - 90) * Math.PI / 180
+        const x1 = cx + Math.cos(rad) * (r - 4)
+        const y1 = cy + Math.sin(rad) * (r - 4)
+        const x2 = cx + Math.cos(rad) * r
+        const y2 = cy + Math.sin(rad) * r
+        return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="white" strokeWidth={1.8} strokeLinecap="round" opacity={0.5} />
+      })}
+    </svg>
+  )
 }
 
 function Dial({ rotation = 0 }: { rotation?: number }) {
   return (
     <div 
-      className="absolute h-[33.993px] left-[24.36px] top-[19.27px] w-[32.879px] transition-transform duration-75" 
+      className="absolute h-[35px] left-[25px] top-[20px] w-[35px] transition-transform duration-75" 
       data-name="Dial"
       style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center' }}
     >
@@ -107,7 +93,7 @@ function Dial({ rotation = 0 }: { rotation?: number }) {
               <stop offset="1" stopColor="#33322F" />
             </radialGradient>
             <linearGradient gradientUnits="userSpaceOnUse" id="paint4_linear_1_128" x1="14.7551" x2="24.8845" y1="10.9653" y2="38.2839">
-              <stop stopColor="#EFEFEF" />
+              <stop stopColor="#919090" />
               <stop offset="0.569707" stopColor="#343333" />
             </linearGradient>
           </defs>
@@ -117,30 +103,11 @@ function Dial({ rotation = 0 }: { rotation?: number }) {
   );
 }
 
-function MinMax() {
-  return (
-    <div className="absolute contents leading-[5px] left-[1.08px] text-[4.4px] top-[68.3px] tracking-[-0.352px]" data-name="min max">
-      <p className="-translate-x-1/2 absolute h-[5.703px] left-[15.31px] opacity-90 top-[68.3px] w-[28.458px]">min(-10dB)</p>
-      <p className="-translate-x-1/2 absolute h-[5.703px] left-[64.52px] opacity-90 top-[68.3px] w-[24.901px]">max(10dB)</p>
-    </div>
-  );
-}
-
-function Labels1() {
-  return (
-    <div className="absolute contents font-['Red_Hat_Mono:Regular',sans-serif] font-normal left-0 text-center text-white top-0 uppercase" data-name="Labels">
-      <MinMax />
-      <p className="-translate-x-1/2 absolute h-[7.984px] leading-[normal] left-[7.71px] opacity-90 text-[5.6px] top-0 tracking-[-0.448px] w-[15.415px]">bass</p>
-    </div>
-  );
-}
-
 function Bass({ rotation = 0 }: { rotation?: number }) {
   return (
     <div className="absolute contents left-0 top-0" data-name="Bass">
       <Marks />
       <Dial rotation={rotation} />
-      <Labels1 />
     </div>
   );
 }

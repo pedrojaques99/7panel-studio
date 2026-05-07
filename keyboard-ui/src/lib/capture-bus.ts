@@ -1,3 +1,5 @@
+import { useSyncExternalStore, useCallback, useMemo } from 'react'
+
 export type CaptureSource = {
   id: string
   label: string
@@ -43,4 +45,27 @@ export const captureRegistry = {
     recListeners.add(fn)
     return () => { recListeners.delete(fn) }
   },
+}
+
+// ── React hooks for consuming capture sources ──
+
+let snapVersion = 0
+let snap: CaptureSource[] = []
+captureRegistry.subscribe(() => { snapVersion++; snap = captureRegistry.list() })
+snap = captureRegistry.list()
+
+export function useCaptureSourceList(): CaptureSource[] {
+  return useSyncExternalStore(
+    captureRegistry.subscribe,
+    () => snap,
+  )
+}
+
+export function useCaptureStream(sourceId: string | null): MediaStream | null {
+  const sources = useCaptureSourceList()
+  return useMemo(() => {
+    if (!sourceId) return null
+    const src = sources.find(s => s.id === sourceId)
+    return src?.getStream() ?? null
+  }, [sourceId, sources])
 }

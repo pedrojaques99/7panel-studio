@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "audiomotion-analyzer": "^4.5.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
@@ -19,6 +20,7 @@
     "react-dom": "^19.2.5",
     "react-rnd": "^10.5.3",
     "react-zoom-pan-pinch": "^4.0.3",
+    "simplex-noise": "^4.0.3",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
     "tone": "^15.1.22"
