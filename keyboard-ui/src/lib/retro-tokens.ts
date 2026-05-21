@@ -124,7 +124,7 @@ export const retroVignetteOverlay: React.CSSProperties = {
 export const retroTimecodeStyle: React.CSSProperties = {
   position: 'absolute', bottom: 6, left: 8, zIndex: 3,
   fontFamily: 'monospace', fontSize: 'var(--fs-xs)',
-  color: 'rgba(255,255,255,0.5)',
+  color: 'var(--text-50)',
   textShadow: '0 1px 3px rgba(0,0,0,0.8)',
   pointerEvents: 'none',
 }

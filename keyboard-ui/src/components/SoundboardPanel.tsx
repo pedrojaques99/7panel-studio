@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Rnd } from 'react-rnd'
-import { audioSrc, API } from '../lib/api'
+import { audioSrc, API, resolveUrl } from '../lib/api'
 import { loadGeo, saveGeo } from '../lib/geo'
 import type { SbChannel } from '../lib/types'
 import { usePanelCtx } from '../lib/panel-context'
@@ -11,7 +12,7 @@ import { CaptureIdContext } from '../lib/PanelHeader'
 import { getSharedAudioContext, createCaptureDestination } from '../lib/audio-context'
 
 export type { SbChannel }
-export type SoundKey = { id: string; label: string; emoji: string; src: string; color?: string }
+export type SoundKey = { id: string; label: string; emoji: string; src: string; color?: string; trimStart?: number; trimEnd?: number; speed?: number }
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type PlayMode = 'toggle'
 
@@ -78,30 +79,46 @@ function loadKeys(): SoundKey[] {
   ]
 }
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
+
+function fmtTime(s: number): string {
+  if (!s || s < 0) return '0:00'
+  const m = Math.floor(s / 60)
+  const sec = Math.floor(s % 60)
+  return `${m}:${sec.toString().padStart(2, '0')}`
+}
+
+function parseTime(v: string): number {
+  const parts = v.replace(/[^0-9:]/g, '').split(':')
+  if (parts.length === 2) return (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0)
+  return parseInt(parts[0]) || 0
+}
+
 /* ── Edit popup ── */
 function EditPopup({
-  keyItem, anchorRef, onSave, onClose,
+  keyItem, anchorRef: _anchorRef, clickPos, onSave, onClose,
 }: {
   keyItem: SoundKey
   anchorRef: React.RefObject<HTMLDivElement | null>
+  clickPos: { x: number; y: number }
   onSave: (patch: Partial<SoundKey>) => void
   onClose: () => void
 }) {
-  const [form, setForm] = useState({ label: keyItem.label, emoji: keyItem.emoji, src: keyItem.src, color: keyItem.color || COLORS[0] })
+  const [form, setForm] = useState({ label: keyItem.label, emoji: keyItem.emoji, src: keyItem.src, color: keyItem.color || COLORS[0], trimStart: keyItem.trimStart ?? 0, trimEnd: keyItem.trimEnd ?? 0, speed: keyItem.speed ?? 1 })
   const popRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number }>({ top: 0, left: 0 })
 
   useEffect(() => {
-    if (!anchorRef.current) return
-    const r = anchorRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - r.bottom
     const popH = 210
+    const popW = 240
+    const cx = Math.min(clickPos.x, window.innerWidth - popW - 8)
+    const spaceBelow = window.innerHeight - clickPos.y
     if (spaceBelow >= popH + 8) {
-      setPos({ top: r.bottom + 6, left: r.left })
+      setPos({ top: clickPos.y + 6, left: cx })
     } else {
-      setPos({ bottom: window.innerHeight - r.top + 6, left: r.left })
+      setPos({ bottom: window.innerHeight - clickPos.y + 6, left: cx })
     }
-  }, [anchorRef])
+  }, [clickPos])
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node)) onClose() }
@@ -153,15 +170,45 @@ function EditPopup({
           }} />
         ))}
       </div>
+      {/* Trim */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'rgba(255,255,255,0.4)', fontWeight: 700, flexShrink: 0 }}>TRIM</span>
+        <input
+          value={fmtTime(form.trimStart)}
+          onChange={e => setForm(f => ({ ...f, trimStart: parseTime(e.target.value) }))}
+          placeholder="0:00"
+          style={{ ...inp, width: 58, textAlign: 'center', padding: '5px 4px', fontSize: 'var(--fs-sm)', fontFamily: 'monospace' }}
+        />
+        <span style={{ color: 'var(--text-25)', fontSize: 'var(--fs-sm)' }}>→</span>
+        <input
+          value={form.trimEnd ? fmtTime(form.trimEnd) : ''}
+          onChange={e => setForm(f => ({ ...f, trimEnd: parseTime(e.target.value) }))}
+          placeholder="end"
+          style={{ ...inp, width: 58, textAlign: 'center', padding: '5px 4px', fontSize: 'var(--fs-sm)', fontFamily: 'monospace' }}
+        />
+      </div>
+      {/* Speed */}
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'rgba(255,255,255,0.4)', fontWeight: 700, flexShrink: 0 }}>SPD</span>
+        {SPEEDS.map(s => (
+          <button key={s} onClick={() => setForm(f => ({ ...f, speed: s }))} style={{
+            flex: 1, padding: '4px 0', border: 'none', borderRadius: 6, cursor: 'pointer',
+            background: form.speed === s ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.04)',
+            color: form.speed === s ? '#fff' : 'rgba(255,255,255,0.4)',
+            fontSize: 'var(--fs-sm)', fontWeight: 800, fontFamily: 'monospace',
+            transition: 'background 0.12s',
+          }}>{s}x</button>
+        ))}
+      </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button onClick={() => onSave(form)} style={{
           flex: 1, padding: '7px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
           background: 'linear-gradient(180deg,#e5e7eb,#9ca3af)', color: '#000',
           fontWeight: 800, fontSize: 'var(--fs-md)', letterSpacing: '0.2em', textTransform: 'uppercase',
-        }}>Save</button>
+        }}>Salvar</button>
         <button onClick={onClose} style={{
           padding: '7px 12px', border: 'none', borderRadius: 8, cursor: 'pointer',
-          background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)',
+          background: 'var(--bg-hover)', color: 'rgba(255,255,255,0.35)',
           fontWeight: 700, fontSize: 'var(--fs-md)',
         }}>✕</button>
       </div>
@@ -266,7 +313,7 @@ function MixesMenu({
                     onClick={() => setPendingId(null)}
                     style={{
                       padding: '3px 6px', border: 'none', borderRadius: 6, cursor: 'pointer',
-                      background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.4)',
+                      background: 'var(--bg-active)', color: 'rgba(255,255,255,0.4)',
                       fontSize: 'var(--fs-base)', fontWeight: 700,
                     }}
                   >No</button>
@@ -299,7 +346,7 @@ function MixesMenu({
       )}
 
       {/* Divider */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '0 -2px' }} />
+      <div style={{ borderTop: '1px solid var(--border-subtle)', margin: '0 -2px' }} />
 
       {/* Export / Import */}
       <div style={{ display: 'flex', gap: 6 }}>
@@ -316,7 +363,7 @@ function MixesMenu({
 
 const mixActionBtn: React.CSSProperties = {
   flex: 1, padding: '6px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
-  background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)',
+  background: 'var(--bg-hover)', color: 'var(--text-50)',
   fontWeight: 700, fontSize: 'var(--fs-base)', letterSpacing: '0.05em',
 }
 
@@ -343,6 +390,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set())
   const [keyStates, setKeyStates] = useState<Map<string, KeyState>>(new Map())
   const [editKey, setEditKey] = useState<SoundKey | null>(null)
+  const editClickPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const [mixes, setMixes] = useState<SbMix[]>(loadMixes)
   const [showMixes, setShowMixes] = useState(false)
 
@@ -427,7 +475,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     if (!key.src) return
     let src: string
     if (isYouTube(key.src)) {
-      src = `${API}/api/yt-stream?url=${encodeURIComponent(key.src)}`
+      src = resolveUrl(`/api/yt-stream?url=${encodeURIComponent(key.src)}`)
     } else {
       src = audioSrc(key.src)
     }
@@ -439,11 +487,16 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
       a.crossOrigin = 'anonymous'
       a.loop = true
       a.volume = initSt.volume / 100
+      a.playbackRate = key.speed ?? 1
       let lastTu = 0
       a.addEventListener('timeupdate', () => {
         const now = performance.now()
         if (now - lastTu < 200) return
         lastTu = now
+        const curKey = keysRef.current.find(k => k.id === key.id)
+        if (curKey?.trimEnd && a!.currentTime >= curKey.trimEnd) {
+          a!.currentTime = curKey.trimStart ?? 0
+        }
         setKeyStates(prev => { const m = new Map(prev); const s = m.get(key.id) ?? initSt; m.set(key.id, { ...s, currentTime: a!.currentTime }); return m })
       })
       a.addEventListener('loadedmetadata', () => setKeyStates(prev => { const m = new Map(prev); const s = m.get(key.id) ?? initSt; m.set(key.id, { ...s, duration: a!.duration }); return m }))
@@ -457,7 +510,8 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
       a.src = src
       a.volume = vol / 100
     }
-    a.currentTime = 0
+    a.currentTime = key.trimStart ?? 0
+    a.playbackRate = key.speed ?? 1
     setLoading(key.id, true)
     a.play()
       .then(() => { setLoading(key.id, false); setPlaying(key.id, true); setPaused(key.id, false) })
@@ -473,9 +527,12 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   const commitEdit = (id: string, patch: Partial<SoundKey>) => {
     setKeys(prev => prev.map(k => k.id === id ? { ...k, ...patch } : k))
     const a = audioMap.current.get(id)
-    if (a && patch.src) {
-      a.pause(); a.src = audioSrc(patch.src); a.currentTime = 0
-      setPlaying(id, false); setPaused(id, false)
+    if (a) {
+      if (patch.speed != null) a.playbackRate = patch.speed
+      if (patch.src) {
+        a.pause(); a.src = audioSrc(patch.src); a.currentTime = patch.trimStart ?? 0
+        setPlaying(id, false); setPaused(id, false)
+      }
     }
     setEditKey(null)
   }
@@ -602,7 +659,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
               title="Mixes"
               style={{
                 height: 22, padding: '0 8px', borderRadius: 'var(--radius-xs)', border: 'none', cursor: 'pointer',
-                background: showMixes ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)',
+                background: showMixes ? 'rgba(255,255,255,0.14)' : 'var(--bg-hover)',
                 color: showMixes ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
                 fontSize: 'var(--fs-base)', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
                 display: 'flex', alignItems: 'center', gap: 4,
@@ -625,7 +682,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
               title="Add sound key"
               style={{
                 width: 22, height: 22, borderRadius: 'var(--radius-xs)', border: 'none', cursor: 'pointer',
-                background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)',
+                background: 'var(--bg-hover)', color: 'rgba(255,255,255,0.35)',
                 fontSize: 'var(--fs-2xl)', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0, transition: 'background 0.15s',
               }}
@@ -656,7 +713,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
                   dim={!key.src}
                   className="sb-key-wrap"
                   onClick={() => handleClick(key)}
-                  onContextMenu={e => { e.preventDefault(); setEditKey(key) }}
+                  onContextMenu={e => { e.preventDefault(); setEditKey(key); editClickPos.current = { x: e.clientX, y: e.clientY } }}
                   style={{ width: '100%', height: KEY_SIZE, cursor: key.src ? 'pointer' : 'default' }}
                 >
                   {isPaused && (
@@ -700,7 +757,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
                         opacity: 0, transition: 'opacity 0.15s',
                       }}
                     >
-                      <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+                      <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'var(--border-light)', overflow: 'hidden' }}>
                         <div style={{
                           height: '100%', borderRadius: 2,
                           width: `${keyStates.get(key.id)?.volume ?? 80}%`,
@@ -731,18 +788,20 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
         </div>
       </Rnd>
 
-      {/* Edit popup */}
-      {editKey && (
+      {/* Edit popup — portaled to body to escape canvas transform */}
+      {editKey && createPortal(
         <EditPopup
           keyItem={editKey}
           anchorRef={{ current: keyRefs.current.get(editKey.id) ?? null } as React.RefObject<HTMLDivElement | null>}
+          clickPos={editClickPos.current}
           onSave={patch => commitEdit(editKey.id, patch)}
           onClose={() => setEditKey(null)}
-        />
+        />,
+        document.body,
       )}
 
-      {/* Mixes popup */}
-      {showMixes && (
+      {/* Mixes popup — portaled to body to escape canvas transform */}
+      {showMixes && createPortal(
         <MixesMenu
           mixes={mixes}
           anchorRef={mixBtnRef}
@@ -753,7 +812,8 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
           onExport={exportMixes}
           onImport={importMixes}
           onClose={() => setShowMixes(false)}
-        />
+        />,
+        document.body,
       )}
 
       {/* Hidden file input for import */}

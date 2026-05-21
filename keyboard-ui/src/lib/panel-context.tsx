@@ -34,6 +34,7 @@ interface PanelCtx {
   bringToFront: (id: string) => void
   endDrag: (id: string) => void
   isDragging: (id: string) => boolean
+  focusedPanel: string | null
 }
 
 const Ctx = createContext<PanelCtx>({
@@ -45,6 +46,7 @@ const Ctx = createContext<PanelCtx>({
   bringToFront: () => {},
   endDrag: () => {},
   isDragging: () => false,
+  focusedPanel: null,
 })
 
 export function PanelProvider({ children }: { children: ReactNode }) {
@@ -55,6 +57,7 @@ export function PanelProvider({ children }: { children: ReactNode }) {
   const zRef = useRef(20)
   const [zMap, setZMap] = useState<Record<string, number>>({})
   const [draggingPanel, setDraggingPanel] = useState<string | null>(null)
+  const [focusedPanel, setFocusedPanel] = useState<string | null>(null)
   const persistDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function setScale(s: number) {
@@ -73,6 +76,7 @@ export function PanelProvider({ children }: { children: ReactNode }) {
     zRef.current += 1
     setZMap(m => ({ ...m, [id]: zRef.current }))
     setDraggingPanel(id)
+    setFocusedPanel(id)
   }
 
   function endDrag(id: string) {
@@ -88,6 +92,7 @@ export function PanelProvider({ children }: { children: ReactNode }) {
     bringToFront,
     endDrag,
     isDragging: (id) => draggingPanel === id,
+    focusedPanel,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

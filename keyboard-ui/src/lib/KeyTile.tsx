@@ -55,7 +55,7 @@ export const KeyTile = React.forwardRef<HTMLDivElement, KeyTileProps>(function K
     ? 'var(--status-ok)'
     : active
       ? accent
-      : 'rgba(255,255,255,0.08)'
+      : 'var(--bg-active)'
   const ledGlow = playing
     ? '0 0 6px rgba(0,184,96,0.9)'
     : active

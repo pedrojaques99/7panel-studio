@@ -12,11 +12,15 @@ import { VIS_MODES, KNOB_REGISTRY, type VisMode, type VisEngine } from '../lib/v
 import { AUDIOMOTION_PRESETS, CRT_GRADIENTS } from '../lib/visualizers/audiomotion-config'
 import { ShaderEngine, type ShaderParams, DEFAULT_SHADER_PARAMS } from '../lib/visualizers/shader-engine'
 import { SHADER_PLASMA, SHADER_VORONOI, SHADER_WARP, SHADER_FRACTAL, SHADER_NEON } from '../lib/visualizers/shaders'
+import { PostFxEngine } from '../lib/visualizers/post-fx-engine'
+import { POST_FX_LIST, type PostFxId } from '../lib/visualizers/post-fx-shaders'
+import { modulateValue, modulateRecord, isReactive } from '../lib/visualizers/reactivity-engine'
 import { ScopeEngine } from '../lib/visualizers/scope'
 import { SmokeEngine } from '../lib/visualizers/smoke'
 import { RingsEngine } from '../lib/visualizers/rings'
 import { GridEngine } from '../lib/visualizers/grid-vis'
 import { LettersEngine } from '../lib/visualizers/letters'
+import { FlowEngine } from '../lib/visualizers/flow'
 
 const SHADER_MAP: Record<string, string> = {
   plasma: SHADER_PLASMA, voronoi: SHADER_VORONOI, warp: SHADER_WARP,
@@ -31,6 +35,7 @@ function createCustomEngine(mode: VisMode): VisEngine | null {
     case 'rings': return new RingsEngine()
     case 'grid': return new GridEngine()
     case 'letters': return new LettersEngine()
+    case 'flow': return new FlowEngine()
     default: return null
   }
 }
@@ -130,11 +135,17 @@ export interface VisParams {
   particle: Partial<ParticleParams>
   shader: Partial<ShaderParams>
   custom: Record<string, number>
+  postFx: Record<PostFxId, { on: boolean; intensity: number }>
+  postFxFlipY: boolean
+  reactiveOff: string[]
 }
 
 export const DEFAULT_VIS_PARAMS: VisParams = {
   sensitivity: 1, waveformMix: 1, hueShift: 0, smoothing: 0.7, barSpace: 0.2, spinSpeed: 1, lineWidth: 2, fillAlpha: 0.3,
   gradient: 'green', particle: {}, shader: {}, custom: {},
+  postFx: { crt: { on: false, intensity: 1 }, chromatic: { on: false, intensity: 1 }, bloom: { on: false, intensity: 1 }, vhs: { on: false, intensity: 1 }, grain: { on: false, intensity: 1 }, pixelate: { on: false, intensity: 1 }, edgeglow: { on: false, intensity: 1 } },
+  postFxFlipY: false,
+  reactiveOff: [],
 }
 
 // ── Preset system ──
@@ -161,6 +172,7 @@ const BUILTIN_PRESETS: VisPreset[] = [
   { name: 'Sonar', mode: 'rings', builtIn: true, params: { ...DEFAULT_VIS_PARAMS, sensitivity: 1.4, custom: { ringSpeed: 2, beatThresh: 0.5, glow: 6, maxRings: 40, arcSpeed: 0.5 } } },
   { name: 'Barcode', mode: 'grid', builtIn: true, params: { ...DEFAULT_VIS_PARAMS, custom: { cols: 32, rows: 14, scanSpeed: 80, glowThresh: 0.5 } } },
   // { name: 'Kanji Rain', mode: 'letters', ... },
+  { name: 'DVD Bounce', mode: 'flow', builtIn: true, params: { ...DEFAULT_VIS_PARAMS, custom: { speed: 2 } } },
   // Shader engines
   { name: 'Plasma', mode: 'plasma', builtIn: true, params: { ...DEFAULT_VIS_PARAMS, shader: { speed: 1, zoom: 1, reactivity: 1.2 } } },
   { name: 'Cells', mode: 'voronoi', builtIn: true, params: { ...DEFAULT_VIS_PARAMS, shader: { speed: 0.8, zoom: 1, complexity: 1.2 } } },
@@ -212,6 +224,8 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const glCanvasRef = useRef<HTMLCanvasElement>(null)
+  const postFxCanvasRef = useRef<HTMLCanvasElement>(null)
+  const postFxRef = useRef<PostFxEngine | null>(null)
   const scanlineRef = useRef<HTMLDivElement>(null)
   const amRef = useRef<AudioMotionAnalyzer | null>(null)
   const engineRef = useRef<VisEngine | null>(null)
@@ -220,6 +234,8 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
   const rafRef = useRef<number>(0)
   const visParamsRef = useRef(visParams)
   visParamsRef.current = visParams
+  const reactiveOffSet = useRef(new Set<string>())
+  reactiveOffSet.current = new Set(visParams?.reactiveOff ?? [])
   const onBeatRef = useRef(onBeat)
   onBeatRef.current = onBeat
   const modeEntry = VIS_MODES.find(m => m.id === mode)!
@@ -290,12 +306,31 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
           getOrCreateSource(audioEl).connect(beatAnalyser)
         }
         const beatData = new Uint8Array(beatAnalyser.frequencyBinCount)
+        let amSmooth: AudioBands = { ...ZERO_BANDS }
         const beatLoop = () => {
           rafRef.current = requestAnimationFrame(beatLoop)
           const raw = detectBeats(readBands(beatAnalyser, beatData))
+          amSmooth = smoothBands(amSmooth, raw)
+          smoothRef.current = amSmooth
           if (raw.beatKick) onBeatRef.current?.('kick')
           if (raw.beatSnare) onBeatRef.current?.('snare')
           if (raw.beatHat) onBeatRef.current?.('hat')
+          if (scanlineRef.current) scanlineRef.current.style.opacity = String(0.04 + amSmooth.bass * 0.08)
+          // Reactive modulation for audiomotion params
+          const amInst = amRef.current
+          if (amInst) {
+            const vp = visParamsRef.current || DEFAULT_VIS_PARAMS
+            const ro = reactiveOffSet.current
+            amInst.smoothing = Math.min(0.95, modulateValue('smoothing', vp.smoothing, amSmooth, ro))
+            amInst.barSpace = Math.min(1, modulateValue('barSpace', vp.barSpace, amSmooth, ro))
+            const s = Math.max(0.2, Math.min(3.4, modulateValue('sensitivity', vp.sensitivity, amSmooth, ro)))
+            const minDb = -85 / s, maxDb = -25 / s
+            try { if (minDb < maxDb) amInst.setSensitivity(minDb, maxDb) } catch { /* */ }
+          }
+          if (postFxRef.current?.hasActive && containerRef.current) {
+            postFxRef.current.flipY = visParamsRef.current?.postFxFlipY ?? false
+            postFxRef.current.draw(containerRef.current, scaleBands(amSmooth, visParamsRef.current?.sensitivity ?? 1))
+          }
         }
         rafRef.current = requestAnimationFrame(beatLoop)
       } catch { am = null }
@@ -330,8 +365,16 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
           if (raw.beatHat) onBeatRef.current?.('hat')
           if (scanlineRef.current) scanlineRef.current.style.opacity = String(0.04 + smooth.bass * 0.08)
           const sp = visParamsRef.current?.shader ?? {}
-          const hueRad = (visParamsRef.current?.hueShift ?? 0) * Math.PI / 180
-          shader.draw(scaleBands(smooth, visParamsRef.current?.sensitivity ?? 1, visParamsRef.current?.waveformMix ?? 1), { ...sp, colorShift: (sp.colorShift ?? 0) + hueRad })
+          const ro = reactiveOffSet.current
+          const hueRad = modulateValue('hueShift', (visParamsRef.current?.hueShift ?? 0), smooth, ro) * Math.PI / 180
+          const sens = modulateValue('sensitivity', visParamsRef.current?.sensitivity ?? 1, smooth, ro)
+          const scaledS = scaleBands(smooth, sens, visParamsRef.current?.waveformMix ?? 1)
+          const modSp = modulateRecord(sp as Record<string, number>, smooth, ro)
+          shader.draw(scaledS, { ...modSp, colorShift: (modSp.colorShift ?? 0) + hueRad })
+          if (postFxRef.current?.hasActive && glCanvas) {
+            postFxRef.current.flipY = visParamsRef.current?.postFxFlipY ?? false
+            postFxRef.current.draw(glCanvas, scaledS)
+          }
         }
         rafRef.current = requestAnimationFrame(loop)
       }
@@ -372,12 +415,22 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
           if (raw.beatSnare) onBeatRef.current?.('snare')
           if (raw.beatHat) onBeatRef.current?.('hat')
           if (scanlineRef.current) scanlineRef.current.style.opacity = String(0.04 + smooth.bass * 0.08)
-          const scaled = scaleBands(smooth, visParamsRef.current?.sensitivity ?? 1, visParamsRef.current?.waveformMix ?? 1)
-          const hs = visParamsRef.current?.hueShift ?? 0
+          const ro = reactiveOffSet.current
+          const sens = modulateValue('sensitivity', visParamsRef.current?.sensitivity ?? 1, smooth, ro)
+          const scaled = scaleBands(smooth, sens, visParamsRef.current?.waveformMix ?? 1)
+          const hs = modulateValue('hueShift', visParamsRef.current?.hueShift ?? 0, smooth, ro)
           if (mode === 'particles') {
-            (engine as ParticleEngine).draw(ctx2d, cw, ch, scaled, { ...visParamsRef.current?.particle, hueShift: hs })
+            const pp = visParamsRef.current?.particle ?? {}
+            const modPp = modulateRecord(pp as Record<string, number>, smooth, ro)
+            ;(engine as ParticleEngine).draw(ctx2d, cw, ch, scaled, { ...modPp, hueShift: hs })
           } else {
-            engine!.draw(ctx2d, cw, ch, scaled, { ...visParamsRef.current?.custom, hueShift: hs })
+            const cp = visParamsRef.current?.custom ?? {}
+            const modCp = modulateRecord(cp, smooth, ro)
+            engine!.draw(ctx2d, cw, ch, scaled, { ...modCp, hueShift: hs })
+          }
+          if (postFxRef.current?.hasActive && canvas) {
+            postFxRef.current.flipY = visParamsRef.current?.postFxFlipY ?? false
+            postFxRef.current.draw(canvas, scaled)
           }
         }
         rafRef.current = requestAnimationFrame(loop)
@@ -406,6 +459,33 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
     return () => { shaderRef.current?.dispose(); shaderRef.current = null }
   }, [])
 
+  // PostFx: sync active effects (lazy init on first toggle)
+  const postFxParams = visParams?.postFx
+  useEffect(() => {
+    const pf = postFxParams
+    if (!pf) return
+    const anyOn = POST_FX_LIST.some(d => pf[d.id]?.on)
+    if (anyOn && !postFxRef.current) {
+      const c = postFxCanvasRef.current
+      if (!c) return
+      const engine = new PostFxEngine()
+      if (!engine.init(c)) return
+      postFxRef.current = engine
+    }
+    const fx = postFxRef.current
+    if (!fx) return
+    fx.flipY = visParams?.postFxFlipY ?? false
+    for (const def of POST_FX_LIST) {
+      const entry = pf[def.id]
+      fx.setActive(def.id, entry?.on ?? false)
+      fx.setIntensity(def.id, entry?.intensity ?? 1)
+    }
+  }, [postFxParams, visParams?.postFxFlipY])
+
+  useEffect(() => {
+    return () => { postFxRef.current?.dispose(); postFxRef.current = null }
+  }, [])
+
   // Live-patch audiomotion
   useEffect(() => {
     const am = amRef.current
@@ -413,10 +493,10 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
     const vp = visParams || DEFAULT_VIS_PARAMS
     am.smoothing = vp.smoothing
     am.barSpace = vp.barSpace
-    const s = vp.sensitivity || 1
+    const s = Math.max(0.2, Math.min(3.4, vp.sensitivity || 1))
     const minDb = -85 / s
     const maxDb = -25 / s
-    if (minDb < maxDb) am.setSensitivity(minDb, maxDb)
+    try { if (minDb < maxDb) am.setSensitivity(minDb, maxDb) } catch { /* clamp overflow */ }
     if (mode === 'radial') (am as any).spinSpeed = vp.spinSpeed
     if (mode === 'line') { am.lineWidth = vp.lineWidth; am.fillAlpha = vp.fillAlpha }
     am.gradient = vp.gradient === 'warm' ? 'crt-warm' : 'crt-green'
@@ -430,6 +510,7 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
       <div ref={containerRef} style={modeEntry.engine === 'audiomotion' ? baseStyle : hiddenStyle} />
       <canvas ref={glCanvasRef} style={modeEntry.engine === 'shader' ? baseStyle : hiddenStyle} />
       <canvas ref={canvasRef} style={modeEntry.engine === 'custom' ? baseStyle : hiddenStyle} />
+      <canvas ref={postFxCanvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 10, visibility: 'hidden' }} />
       <div ref={scanlineRef} style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 2,
         background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 3px)',
@@ -441,9 +522,10 @@ function CrtVisualizer({ audioEl, audioStream, mode, visParams, onBeat, activeCa
   )
 }
 
-export function RetroTVPanel({ onClose }: { onClose: () => void }) {
+export function RetroTVPanel({ instanceId, onClose }: { instanceId: string; onClose: () => void }) {
   const { scale, zOf, bringToFront, endDrag, isDragging } = usePanelCtx()
-  const geo = loadGeo('retrotv', { x: 200, y: 100, w: 480, h: 0 })
+  const geoKey = instanceId === 'retrotv-0' ? 'retrotv' : instanceId
+  const geo = loadGeo(geoKey, { x: 200 + Math.random() * 60, y: 100 + Math.random() * 60, w: 480, h: 0 })
   const [media, setMedia] = useState<MediaSource | null>(null)
   const [urlInput, setUrlInput] = useState('')
   const [isOn, setIsOn] = useState(true)
@@ -477,24 +559,37 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
   const captureSources = useCaptureSourceList()
   const panelStream = useCaptureStream(panelSourceId)
 
-  const [autoRotate, setAutoRotate] = useState(false)
-  const autoRotateRef = useRef(false)
+  const [autoRotate, setAutoRotate] = useState<'off' | 'beats' | 'time'>('off')
+  const autoRotateRef = useRef<'off' | 'beats' | 'time'>('off')
   autoRotateRef.current = autoRotate
   const kickCountRef = useRef(0)
+  const timeRotateRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const advanceMode = useCallback(() => {
+    setVisMode(prev => {
+      const idx = VIS_MODES.findIndex(m => m.id === prev)
+      const next = (idx + 1) % VIS_MODES.length
+      localStorage.setItem('retrotv-vismode', VIS_MODES[next].id)
+      return VIS_MODES[next].id
+    })
+  }, [])
+
+  useEffect(() => {
+    if (timeRotateRef.current) { clearInterval(timeRotateRef.current); timeRotateRef.current = null }
+    if (autoRotate === 'time') {
+      timeRotateRef.current = setInterval(advanceMode, 10_000)
+    }
+    return () => { if (timeRotateRef.current) clearInterval(timeRotateRef.current) }
+  }, [autoRotate, advanceMode])
 
   const handleBeat = useCallback((type: 'kick' | 'snare' | 'hat') => {
-    if (!autoRotateRef.current || type !== 'kick') return
-    kickCountRef.current++
-    if (kickCountRef.current >= 16) {
+    if (autoRotateRef.current !== 'beats') return
+    if (type === 'kick') kickCountRef.current++
+    if (kickCountRef.current >= 6) {
       kickCountRef.current = 0
-      setVisMode(prev => {
-        const idx = VIS_MODES.findIndex(m => m.id === prev)
-        const next = (idx + 1) % VIS_MODES.length
-        localStorage.setItem('retrotv-vismode', VIS_MODES[next].id)
-        return VIS_MODES[next].id
-      })
+      advanceMode()
     }
-  }, [])
+  }, [advanceMode])
 
   const [recording, setRecording] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -753,10 +848,10 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
       scale={scale}
       enableResizing={false}
       disableDragging={isFullscreen}
-      onDragStart={() => bringToFront('retrotv')}
-      onDragStop={(_e, d) => { saveGeo('retrotv', { x: d.x, y: d.y }); endDrag('retrotv') }}
-      style={{ zIndex: isFullscreen ? 9999 : zOf('retrotv', 10) }}
-      className={`panel-drag ${isDragging('retrotv') ? 'dragging' : ''}`}
+      onDragStart={() => bringToFront(geoKey)}
+      onDragStop={(_e, d) => { saveGeo(geoKey, { x: d.x, y: d.y }); endDrag(geoKey) }}
+      style={{ zIndex: isFullscreen ? 9999 : zOf(geoKey, 10) }}
+      className={`panel-drag ${isDragging(geoKey) ? 'dragging' : ''}`}
     >
       <div
         ref={tvRef}
@@ -809,7 +904,19 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                 )}
 
                 {media?.type === 'youtube' && (
-                  <div ref={ytContainerRef} id={`retrotv-yt-${media.videoId}`} style={{ width: '100%', height: '100%', visibility: isOn ? 'visible' : 'hidden' }} />
+                  <div
+                    ref={el => {
+                      (ytContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+                      if (el && !el.querySelector(`#retrotv-yt-${media.videoId}`)) {
+                        const inner = document.createElement('div')
+                        inner.id = `retrotv-yt-${media.videoId}`
+                        inner.style.cssText = 'width:100%;height:100%'
+                        el.innerHTML = ''
+                        el.appendChild(inner)
+                      }
+                    }}
+                    style={{ width: '100%', height: '100%', visibility: isOn ? 'visible' : 'hidden' }}
+                  />
                 )}
                 {isOn && media?.type === 'youtube' && (
                   <div onClick={togglePlay} style={{ position: 'absolute', inset: 0, cursor: 'pointer', zIndex: 1 }} />
@@ -827,7 +934,7 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                     {visOverlay && mediaElReady && (
                       <div onClick={togglePlay} style={{
                         position: 'absolute', inset: 0, cursor: 'pointer',
-                        background: 'rgba(0,0,0,0.5)',
+                        background: 'var(--bg-overlay)',
                       }}>
                         <CrtVisualizer audioEl={mediaElReady} mode={visMode} visParams={visParams} onBeat={handleBeat} activeCanvasRef={activeCanvasRef} />
                       </div>
@@ -901,7 +1008,7 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                     transition: 'opacity 0.3s',
                     pointerEvents: hovered ? 'auto' : 'none',
                   }}>
-                    <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, color: 'var(--text-50)', fontFamily: 'monospace', flexShrink: 0 }}>
                       {fmtTime(currentTime)}
                     </span>
                     <input
@@ -1047,18 +1154,18 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
                     >⚙</button>
                     <button
-                      onClick={() => { setAutoRotate(v => !v); kickCountRef.current = 0 }}
-                      title={autoRotate ? 'Stop auto-rotate' : 'Auto-rotate on beats'}
+                      onClick={() => { setAutoRotate(v => v === 'off' ? 'beats' : v === 'beats' ? 'time' : 'off'); kickCountRef.current = 0 }}
+                      title={autoRotate === 'off' ? 'Auto-rotate: off' : autoRotate === 'beats' ? 'Auto-rotate: beats (click for time)' : 'Auto-rotate: time (click to stop)'}
                       style={{
                         ...retroDialStyle(28),
-                        boxShadow: autoRotate ? 'inset 0 1px 3px rgba(0,0,0,0.4)' : '0 1px 1px rgba(0,0,0,0.2)',
+                        boxShadow: autoRotate !== 'off' ? 'inset 0 1px 3px rgba(0,0,0,0.4)' : '0 1px 1px rgba(0,0,0,0.2)',
                         fontSize: 11, color: RETRO.textOnChassis, fontWeight: 900,
-                        background: autoRotate ? 'rgba(0,0,0,0.12)' : RETRO.dialGradient,
+                        background: autoRotate !== 'off' ? 'rgba(0,0,0,0.12)' : RETRO.dialGradient,
                         transition: 'transform 0.12s ease',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.1)' }}
                       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)' }}
-                    >↻</button>
+                    >{autoRotate === 'off' ? '↻' : autoRotate === 'beats' ? '♪' : '⏱'}</button>
                   </>
                 )}
               </div>
@@ -1119,6 +1226,13 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
           const setVp = (patch: Partial<VisParams>) => setVisParams(prev => ({ ...prev, ...patch }))
           const setPp = (patch: Partial<ParticleParams>) => setVisParams(prev => ({ ...prev, particle: { ...prev.particle, ...patch } }))
           const setSp = (patch: Partial<ShaderParams>) => setVisParams(prev => ({ ...prev, shader: { ...prev.shader, ...patch } }))
+          const roSet = new Set(vp.reactiveOff ?? [])
+          const toggleReactive = (key: string) => {
+            const next = new Set(vp.reactiveOff ?? [])
+            if (next.has(key)) next.delete(key); else next.add(key)
+            setVp({ reactiveOff: [...next] })
+          }
+          const isR = (key: string) => !roSet.has(key)
           const importRef = React.createRef<HTMLInputElement>()
 
           const allPresets = getAllPresets()
@@ -1181,105 +1295,184 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
             <div style={{
               width: '100%', background: RETRO.consoleSurface,
               borderRadius: '0 0 4px 4px',
-              padding: '6px 10px 4px',
+              padding: '10px 12px 8px',
               borderTop: '1px solid rgba(0,0,0,0.1)',
               position: 'relative',
             }}>
               {/* Knobs — centered, with fixed-position action buttons on the right */}
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-              <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                {/* Gradient toggle — audiomotion only */}
-                {isAudiomotion && (
-                  <div
-                    onClick={() => setVp({ gradient: vp.gradient === 'green' ? 'warm' : 'green' })}
-                    title={`Palette: ${vp.gradient} — click to toggle`}
-                    style={{
-                      width: 14, height: 14, borderRadius: '50%', cursor: 'pointer', marginBottom: 4,
-                      background: vp.gradient === 'warm' ? '#d4943a' : '#50b868',
-                      border: '1px solid rgba(0,0,0,0.2)',
-                      boxShadow: `0 0 4px ${vp.gradient === 'warm' ? 'rgba(212,148,58,0.4)' : 'rgba(80,184,104,0.4)'}`,
-                      transition: 'background 0.15s',
-                    }}
-                  />
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+                {/* ── Section: VIS ── */}
+                <div style={{ border: '1px solid rgba(0,0,0,0.06)', borderRadius: 4, padding: '4px 6px 6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 7, fontWeight: 800, color: 'rgba(0,0,0,0.22)', fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>VIS</span>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.06)' }} />
+                    {isAudiomotion && (
+                      <div
+                        onClick={() => setVp({ gradient: vp.gradient === 'green' ? 'warm' : 'green' })}
+                        title={`Palette: ${vp.gradient} — click to toggle`}
+                        style={{
+                          width: 10, height: 10, borderRadius: '50%', cursor: 'pointer',
+                          background: vp.gradient === 'warm' ? '#d4943a' : '#50b868',
+                          border: '1px solid rgba(0,0,0,0.15)',
+                          transition: 'background 0.15s',
+                        }}
+                      />
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))', justifyItems: 'start', alignItems: 'start', gap: '8px 0' }}>
+                    <AppKnob label="SENS" min={0.2} max={5} value={vp.sensitivity}
+                      onChange={v => setVp({ sensitivity: v })} size={32} theme="light" showValue
+                      reactive={isR('sensitivity')} onReactiveToggle={() => toggleReactive('sensitivity')} />
+                    <AppKnob label="WAVE" min={0} max={1} value={vp.waveformMix}
+                      onChange={v => setVp({ waveformMix: v })} size={32} theme="light" showValue
+                      reactive={isR('waveformMix')} onReactiveToggle={() => toggleReactive('waveformMix')} />
+                    <AppKnob label="HUE" min={0} max={360} value={vp.hueShift}
+                      onChange={v => setVp({ hueShift: v })} size={32} theme="light" showValue
+                      reactive={isR('hueShift')} onReactiveToggle={() => toggleReactive('hueShift')} />
+                    {isAudiomotion && (
+                      <AppKnob label="SMOOTH" min={0} max={0.95} value={vp.smoothing}
+                        onChange={v => setVp({ smoothing: v })} size={32} theme="light" showValue
+                        reactive={isR('smoothing')} onReactiveToggle={() => toggleReactive('smoothing')} />
+                    )}
+                    {isAudiomotion && !isLine && (
+                      <AppKnob label="SPACE" min={0} max={1} value={vp.barSpace}
+                        onChange={v => setVp({ barSpace: v })} size={32} theme="light" showValue
+                        reactive={isR('barSpace')} onReactiveToggle={() => toggleReactive('barSpace')} />
+                    )}
+                    {isAudiomotion && isRadial && (
+                      <AppKnob label="SPIN" min={0} max={15} value={vp.spinSpeed}
+                        onChange={v => setVp({ spinSpeed: v })} size={32} theme="light" showValue
+                        reactive={isR('spinSpeed')} onReactiveToggle={() => toggleReactive('spinSpeed')} />
+                    )}
+                    {isAudiomotion && isLine && (
+                      <>
+                        <AppKnob label="WIDTH" min={0.1} max={12} value={vp.lineWidth}
+                          onChange={v => setVp({ lineWidth: v })} size={32} theme="light" showValue
+                          reactive={isR('lineWidth')} onReactiveToggle={() => toggleReactive('lineWidth')} />
+                        <AppKnob label="FILL" min={0} max={1} value={vp.fillAlpha}
+                          onChange={v => setVp({ fillAlpha: v })} size={32} theme="light" showValue
+                          reactive={isR('fillAlpha')} onReactiveToggle={() => toggleReactive('fillAlpha')} />
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Section: mode-specific params ── */}
+                {(isShader || isParticle || isCustom) && (
+                  <div style={{ border: '1px solid rgba(0,0,0,0.06)', borderRadius: 4, padding: '4px 6px 6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 7, fontWeight: 800, color: 'rgba(0,0,0,0.22)', fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                        {isShader ? 'SHADER' : isParticle ? 'PARTICLE' : visMode.toUpperCase()}
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.06)' }} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))', justifyItems: 'start', alignItems: 'start', gap: '8px 0' }}>
+                      {isShader && (
+                        <>
+                          <AppKnob label="SPEED" min={0} max={10} value={vp.shader.speed ?? 1}
+                            onChange={v => setSp({ speed: v })} size={32} theme="light" showValue
+                            reactive={isR('speed')} onReactiveToggle={() => toggleReactive('speed')} />
+                          <AppKnob label="ZOOM" min={0.1} max={10} value={vp.shader.zoom ?? 1}
+                            onChange={v => setSp({ zoom: v })} size={32} theme="light" showValue
+                            reactive={isR('zoom')} onReactiveToggle={() => toggleReactive('zoom')} />
+                          <AppKnob label="COLOR" min={-3.14} max={3.14} value={vp.shader.colorShift ?? 0}
+                            onChange={v => setSp({ colorShift: v })} size={32} theme="light" showValue
+                            reactive={isR('colorShift')} onReactiveToggle={() => toggleReactive('colorShift')} />
+                          <AppKnob label="REACT" min={0} max={5} value={vp.shader.reactivity ?? 1}
+                            onChange={v => setSp({ reactivity: v })} size={32} theme="light" showValue
+                            reactive={isR('reactivity')} onReactiveToggle={() => toggleReactive('reactivity')} />
+                          <AppKnob label="BASS" min={0} max={5} value={vp.shader.bassWeight ?? 1}
+                            onChange={v => setSp({ bassWeight: v })} size={32} theme="light" showValue
+                            reactive={isR('bassWeight')} onReactiveToggle={() => toggleReactive('bassWeight')} />
+                          <AppKnob label="MID" min={0} max={5} value={vp.shader.midWeight ?? 1}
+                            onChange={v => setSp({ midWeight: v })} size={32} theme="light" showValue
+                            reactive={isR('midWeight')} onReactiveToggle={() => toggleReactive('midWeight')} />
+                          <AppKnob label="HIGH" min={0} max={5} value={vp.shader.highWeight ?? 1}
+                            onChange={v => setSp({ highWeight: v })} size={32} theme="light" showValue
+                            reactive={isR('highWeight')} onReactiveToggle={() => toggleReactive('highWeight')} />
+                          <AppKnob label="WARP" min={0} max={5} value={vp.shader.distortion ?? 1}
+                            onChange={v => setSp({ distortion: v })} size={32} theme="light" showValue
+                            reactive={isR('distortion')} onReactiveToggle={() => toggleReactive('distortion')} />
+                          <AppKnob label="GLOW" min={0} max={5} value={vp.shader.glow ?? 1}
+                            onChange={v => setSp({ glow: v })} size={32} theme="light" showValue
+                            reactive={isR('glow')} onReactiveToggle={() => toggleReactive('glow')} />
+                          <AppKnob label="DETAIL" min={0.1} max={5} value={vp.shader.complexity ?? 1}
+                            onChange={v => setSp({ complexity: v })} size={32} theme="light" showValue
+                            reactive={isR('complexity')} onReactiveToggle={() => toggleReactive('complexity')} />
+                        </>
+                      )}
+                      {isParticle && (
+                        <>
+                          <AppKnob label="SPEED" min={0} max={10} value={vp.particle.speed ?? 1.6}
+                            onChange={v => setPp({ speed: v })} size={32} theme="light" showValue
+                            reactive={isR('speed')} onReactiveToggle={() => toggleReactive('speed')} />
+                          <AppKnob label="BRANCH" min={0} max={1} value={vp.particle.branching ?? 0.3}
+                            onChange={v => setPp({ branching: v })} size={32} theme="light" showValue
+                            reactive={isR('branching')} onReactiveToggle={() => toggleReactive('branching')} />
+                          <AppKnob label="CMPLX" min={0.1} max={10} value={vp.particle.complexity ?? 1.2}
+                            onChange={v => setPp({ complexity: v })} size={32} theme="light" showValue
+                            reactive={isR('complexity')} onReactiveToggle={() => toggleReactive('complexity')} />
+                          <AppKnob label="TENSI" min={0} max={1} value={vp.particle.tension ?? 0.12}
+                            onChange={v => setPp({ tension: v })} size={32} theme="light" showValue
+                            reactive={isR('tension')} onReactiveToggle={() => toggleReactive('tension')} />
+                          <AppKnob label="LIFE" min={10} max={2000} value={vp.particle.lifespan ?? 300}
+                            onChange={v => setPp({ lifespan: Math.round(v) })} size={32} theme="light" showValue
+                            reactive={isR('lifespan')} onReactiveToggle={() => toggleReactive('lifespan')} />
+                          <AppKnob label="TRAIL" min={1} max={100} value={vp.particle.trailLen ?? 16}
+                            onChange={v => setPp({ trailLen: Math.round(v) })} size={32} theme="light" showValue
+                            reactive={isR('trailLen')} onReactiveToggle={() => toggleReactive('trailLen')} />
+                          <AppKnob label="FADE" min={0.01} max={0.2} value={vp.particle.fade ?? 0.04}
+                            onChange={v => setPp({ fade: v })} size={32} theme="light" showValue
+                            reactive={isR('fade')} onReactiveToggle={() => toggleReactive('fade')} />
+                          <AppKnob label="MAX" min={50} max={5000} value={vp.particle.maxParticles ?? 600}
+                            onChange={v => setPp({ maxParticles: Math.round(v) })} size={32} theme="light" showValue
+                            reactive={isR('maxParticles')} onReactiveToggle={() => toggleReactive('maxParticles')} />
+                        </>
+                      )}
+                      {isCustom && KNOB_REGISTRY[visMode]?.map(k => (
+                        <AppKnob key={k.key} label={k.label} min={k.min} max={k.max}
+                          value={vp.custom[k.key] ?? k.default}
+                          onChange={v => setVp({ custom: { ...vp.custom, [k.key]: k.step ? Math.round(v) : v } })}
+                          size={32} theme="light" showValue
+                          reactive={isR(k.key)} onReactiveToggle={() => toggleReactive(k.key)} />
+                      ))}
+                    </div>
+                  </div>
                 )}
 
-                <AppKnob label="SENS" min={0.2} max={5} value={vp.sensitivity}
-                  onChange={v => setVp({ sensitivity: v })} size={32} theme="light" />
-                <AppKnob label="WAVE" min={0} max={1} value={vp.waveformMix}
-                  onChange={v => setVp({ waveformMix: v })} size={32} theme="light" />
-                <AppKnob label="HUE" min={0} max={360} value={vp.hueShift}
-                  onChange={v => setVp({ hueShift: v })} size={32} theme="light" />
-
-                {isAudiomotion && (
-                  <AppKnob label="SMOOTH" min={0} max={0.95} value={vp.smoothing}
-                    onChange={v => setVp({ smoothing: v })} size={32} theme="light" />
-                )}
-                {isAudiomotion && !isLine && (
-                  <AppKnob label="SPACE" min={0} max={1} value={vp.barSpace}
-                    onChange={v => setVp({ barSpace: v })} size={32} theme="light" />
-                )}
-                {isAudiomotion && isRadial && (
-                  <AppKnob label="SPIN" min={0} max={15} value={vp.spinSpeed}
-                    onChange={v => setVp({ spinSpeed: v })} size={32} theme="light" />
-                )}
-                {isAudiomotion && isLine && (
-                  <>
-                    <AppKnob label="WIDTH" min={0.1} max={12} value={vp.lineWidth}
-                      onChange={v => setVp({ lineWidth: v })} size={32} theme="light" />
-                    <AppKnob label="FILL" min={0} max={1} value={vp.fillAlpha}
-                      onChange={v => setVp({ fillAlpha: v })} size={32} theme="light" />
-                  </>
-                )}
-                {isShader && (
-                  <>
-                    <AppKnob label="SPEED" min={0} max={10} value={vp.shader.speed ?? 1}
-                      onChange={v => setSp({ speed: v })} size={32} theme="light" />
-                    <AppKnob label="ZOOM" min={0.1} max={10} value={vp.shader.zoom ?? 1}
-                      onChange={v => setSp({ zoom: v })} size={32} theme="light" />
-                    <AppKnob label="COLOR" min={-3.14} max={3.14} value={vp.shader.colorShift ?? 0}
-                      onChange={v => setSp({ colorShift: v })} size={32} theme="light" />
-                    <AppKnob label="REACT" min={0} max={5} value={vp.shader.reactivity ?? 1}
-                      onChange={v => setSp({ reactivity: v })} size={32} theme="light" />
-                    <AppKnob label="BASS" min={0} max={5} value={vp.shader.bassWeight ?? 1}
-                      onChange={v => setSp({ bassWeight: v })} size={32} theme="light" />
-                    <AppKnob label="MID" min={0} max={5} value={vp.shader.midWeight ?? 1}
-                      onChange={v => setSp({ midWeight: v })} size={32} theme="light" />
-                    <AppKnob label="HIGH" min={0} max={5} value={vp.shader.highWeight ?? 1}
-                      onChange={v => setSp({ highWeight: v })} size={32} theme="light" />
-                    <AppKnob label="WARP" min={0} max={5} value={vp.shader.distortion ?? 1}
-                      onChange={v => setSp({ distortion: v })} size={32} theme="light" />
-                    <AppKnob label="GLOW" min={0} max={5} value={vp.shader.glow ?? 1}
-                      onChange={v => setSp({ glow: v })} size={32} theme="light" />
-                    <AppKnob label="DETAIL" min={0.1} max={5} value={vp.shader.complexity ?? 1}
-                      onChange={v => setSp({ complexity: v })} size={32} theme="light" />
-                  </>
-                )}
-                {isParticle && (
-                  <>
-                    <AppKnob label="SPEED" min={0} max={10} value={vp.particle.speed ?? 1.6}
-                      onChange={v => setPp({ speed: v })} size={32} theme="light" />
-                    <AppKnob label="BRANCH" min={0} max={1} value={vp.particle.branching ?? 0.3}
-                      onChange={v => setPp({ branching: v })} size={32} theme="light" />
-                    <AppKnob label="CMPLX" min={0.1} max={10} value={vp.particle.complexity ?? 1.2}
-                      onChange={v => setPp({ complexity: v })} size={32} theme="light" />
-                    <AppKnob label="TENSI" min={0} max={1} value={vp.particle.tension ?? 0.12}
-                      onChange={v => setPp({ tension: v })} size={32} theme="light" />
-                    <AppKnob label="LIFE" min={10} max={2000} value={vp.particle.lifespan ?? 300}
-                      onChange={v => setPp({ lifespan: Math.round(v) })} size={32} theme="light" />
-                    <AppKnob label="TRAIL" min={1} max={100} value={vp.particle.trailLen ?? 16}
-                      onChange={v => setPp({ trailLen: Math.round(v) })} size={32} theme="light" />
-                    <AppKnob label="FADE" min={0.01} max={0.2} value={vp.particle.fade ?? 0.04}
-                      onChange={v => setPp({ fade: v })} size={32} theme="light" />
-                    <AppKnob label="MAX" min={50} max={5000} value={vp.particle.maxParticles ?? 600}
-                      onChange={v => setPp({ maxParticles: Math.round(v) })} size={32} theme="light" />
-                  </>
-                )}
-                {isCustom && KNOB_REGISTRY[visMode]?.map(k => (
-                  <AppKnob key={k.key} label={k.label} min={k.min} max={k.max}
-                    value={vp.custom[k.key] ?? k.default}
-                    onChange={v => setVp({ custom: { ...vp.custom, [k.key]: k.step ? Math.round(v) : v } })}
-                    size={32} theme="light" />
-                ))}
+                {/* ── Section: POST-FX ── */}
+                <div style={{ border: '1px solid rgba(0,0,0,0.06)', borderRadius: 4, padding: '4px 6px 6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 7, fontWeight: 800, color: 'rgba(0,0,0,0.22)', fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>POST-FX</span>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.06)' }} />
+                    <button
+                      onClick={() => setVp({ postFxFlipY: !vp.postFxFlipY })}
+                      title="Flip Y"
+                      style={{
+                        background: vp.postFxFlipY ? 'rgba(42,122,58,0.15)' : 'transparent',
+                        border: `1px solid ${vp.postFxFlipY ? '#2a7a3a' : 'rgba(0,0,0,0.12)'}`,
+                        borderRadius: 3, padding: '1px 5px', cursor: 'pointer',
+                        fontSize: 7, fontWeight: 800, fontFamily: 'monospace', letterSpacing: '0.1em',
+                        color: vp.postFxFlipY ? '#2a7a3a' : 'rgba(0,0,0,0.3)',
+                      }}
+                    >FLIP</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))', justifyItems: 'start', alignItems: 'start', gap: '8px 0' }}>
+                    {POST_FX_LIST.map(fx => {
+                      const entry = vp.postFx?.[fx.id] ?? { on: false, intensity: 1 }
+                      return (
+                        <AppKnob key={fx.id} label={fx.label} min={0.1} max={2} value={entry.intensity}
+                          onChange={v => setVp({ postFx: { ...vp.postFx, [fx.id]: { ...entry, intensity: v } } })}
+                          size={32} theme="light" showValue
+                          labelColor={entry.on ? '#2a7a3a' : undefined}
+                          reactive={isR(`fx_${fx.id}`)} onReactiveToggle={() => toggleReactive(`fx_${fx.id}`)}
+                          onLabelClick={() => setVp({ postFx: { ...vp.postFx, [fx.id]: { ...entry, on: !entry.on } } })} />
+                      )
+                    })}
+                  </div>
+                </div>
 
               </div>{/* end knobs flex */}
                 {/* Shuffle — fixed right side */}
@@ -1322,6 +1515,10 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                         }
                         return c
                       })(),
+                      waveformMix: Math.random(),
+                      hueShift: Math.random() * 360,
+                      postFx: vp.postFx,
+                      reactiveOff: vp.reactiveOff,
                     }
                     setVisParams(rp)
                   }}
@@ -1390,22 +1587,22 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
                           <button onClick={handleSavePreset} style={{
                             ...menuItemStyle, width: 'auto', padding: '2px 6px',
                             background: 'rgba(0,0,0,0.06)', borderRadius: 2,
-                          }}>OK</button>
+                          }}>Salvar</button>
                         </div>
                       ) : (
                         <button style={menuItemStyle} onClick={() => setShowPresetNameInput(true)}
                           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.06)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                        >Save preset...</button>
+                        >Salvar preset...</button>
                       )}
                       <button style={menuItemStyle} onClick={handleExport}
                         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.06)')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                      >Export JSON</button>
+                      >Exportar JSON</button>
                       <button style={menuItemStyle} onClick={() => importRef.current?.click()}
                         onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.06)')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                      >Import JSON</button>
+                      >Importar JSON</button>
                       <input ref={importRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
                     </div>
                   )}
@@ -1428,8 +1625,8 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
         {showSaved && (
           <div style={{
             marginTop: 6, borderRadius: 6,
-            background: 'rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'var(--bg-overlay)',
+            border: '1px solid var(--border-subtle)',
             maxHeight: 200, overflowY: 'auto',
           }}>
             {savedList.length === 0 && (
@@ -1524,7 +1721,7 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
           />
           <button onClick={handleSubmit} title="Carregar" style={{
             height: 28, padding: '0 10px', borderRadius: 4,
-            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+            background: 'var(--bg-active)', border: '1px solid var(--border-light)',
             color: '#fff', fontSize: 10, cursor: 'pointer',
           }}>▶</button>
           {/* Open YouTube link in browser */}
@@ -1534,14 +1731,14 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
               title="Abrir no YouTube"
               style={{
                 height: 28, padding: '0 8px', borderRadius: 4,
-                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+                background: 'var(--bg-active)', border: '1px solid var(--border-light)',
                 color: '#fff', fontSize: 10, cursor: 'pointer',
               }}
             >↗</button>
           )}
           <button onClick={() => fileRef.current?.click()} title="Abrir arquivo" style={{
             height: 28, padding: '0 10px', borderRadius: 4,
-            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)',
+            background: 'var(--bg-active)', border: '1px solid var(--border-light)',
             color: '#fff', fontSize: 10, cursor: 'pointer',
           }}>📂</button>
           {captureSources.length > 0 && (
@@ -1557,8 +1754,8 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
               title="Input de painel"
               style={{
                 height: 28, borderRadius: 4, padding: '0 4px',
-                background: media?.type === 'panel' ? 'rgba(100,255,150,0.15)' : 'rgba(255,255,255,0.08)',
-                border: `1px solid ${media?.type === 'panel' ? 'rgba(100,255,150,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                background: media?.type === 'panel' ? 'rgba(100,255,150,0.15)' : 'var(--bg-active)',
+                border: `1px solid ${media?.type === 'panel' ? 'rgba(100,255,150,0.3)' : 'var(--border-light)'}`,
                 color: '#fff', fontSize: 9, cursor: 'pointer', outline: 'none',
                 maxWidth: 90,
               }}
@@ -1576,8 +1773,8 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
             title="Salvos"
             style={{
               height: 28, padding: '0 8px', borderRadius: 4,
-              background: showSaved ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: showSaved ? 'rgba(255,255,255,0.14)' : 'var(--bg-active)',
+              border: '1px solid var(--border-light)',
               color: '#fff', fontSize: 10, cursor: 'pointer',
             }}
           >☆</button>
@@ -1587,8 +1784,8 @@ export function RetroTVPanel({ onClose }: { onClose: () => void }) {
               title="Salvar mídia"
               style={{
                 height: 28, padding: '0 8px', borderRadius: 4,
-                background: saveFlash === 'saved' ? 'rgba(100,255,100,0.15)' : saveFlash === 'exists' ? 'rgba(255,200,50,0.15)' : 'rgba(255,255,255,0.08)',
-                border: `1px solid ${saveFlash === 'saved' ? 'rgba(100,255,100,0.3)' : saveFlash === 'exists' ? 'rgba(255,200,50,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                background: saveFlash === 'saved' ? 'rgba(100,255,100,0.15)' : saveFlash === 'exists' ? 'rgba(255,200,50,0.15)' : 'var(--bg-active)',
+                border: `1px solid ${saveFlash === 'saved' ? 'rgba(100,255,100,0.3)' : saveFlash === 'exists' ? 'rgba(255,200,50,0.3)' : 'var(--border-light)'}`,
                 color: '#fff', fontSize: 10, cursor: 'pointer',
                 transition: 'all 0.2s',
               }}

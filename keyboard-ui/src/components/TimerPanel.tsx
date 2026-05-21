@@ -16,7 +16,7 @@ export type TimerConfig = {
 
 const defaultConfig: TimerConfig = {
   mode: 'stopwatch', countdownSecs: 3600,
-  color: 'rgba(255,255,255,0.5)', showSeconds: true,
+  color: 'var(--text-50)', showSeconds: true,
 }
 
 function loadConfig(): TimerConfig {
@@ -138,7 +138,7 @@ export function TimerPanel({ onClose }: { onClose: () => void }) {
       style={{ zIndex: zOf('timer', 100) }}
       enableResizing={false}
     >
-      <div style={{ background: 'var(--bg-chassis)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 'var(--radius-panel)', boxShadow: 'var(--shadow-chassis)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-chassis)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-panel)', boxShadow: 'var(--shadow-chassis)', overflow: 'hidden' }}>
         <PanelHeader title="Timer" onClose={onClose} className="drag-handle" />
 
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -152,14 +152,14 @@ export function TimerPanel({ onClose }: { onClose: () => void }) {
             <button onClick={running ? stop : start} style={{ flex: 2, padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 'var(--fs-lg)', background: running ? '#ef444422' : '#00b86022', color: running ? '#ef4444' : '#00b860', border: `1px solid ${running ? '#ef444444' : '#00b86044'}` }}>
               {running ? 'Pausar' : 'Iniciar'}
             </button>
-            <button onClick={reset} style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontWeight: 600, fontSize: 'var(--fs-lg)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.4)' }}>
+            <button onClick={reset} style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontWeight: 600, fontSize: 'var(--fs-lg)', background: 'var(--bg-hover)', color: 'rgba(255,255,255,0.4)' }}>
               Reset
             </button>
           </div>
 
           <div style={{ display: 'flex', gap: 6 }}>
             {(['stopwatch', 'countdown'] as const).map(m => (
-              <button key={m} onClick={() => update({ mode: m })} style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1px solid ${cfg.mode === m ? '#00b86055' : 'rgba(255,255,255,0.08)'}`, cursor: 'pointer', fontSize: 'var(--fs-md)', background: cfg.mode === m ? '#00b86018' : 'rgba(255,255,255,0.04)', color: cfg.mode === m ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: cfg.mode === m ? 700 : 400 }}>
+              <button key={m} onClick={() => update({ mode: m })} style={{ flex: 1, padding: '7px 0', borderRadius: 8, border: `1px solid ${cfg.mode === m ? '#00b86055' : 'var(--bg-active)'}`, cursor: 'pointer', fontSize: 'var(--fs-md)', background: cfg.mode === m ? '#00b86018' : 'rgba(255,255,255,0.04)', color: cfg.mode === m ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: cfg.mode === m ? 700 : 400 }}>
                 {m === 'stopwatch' ? 'Cronômetro' : 'Contagem'}
               </button>
             ))}
@@ -186,11 +186,11 @@ export function TimerPanel({ onClose }: { onClose: () => void }) {
               <div style={labelStyle}>Cor</div>
               <input type="color" value={cfg.color.length === 7 ? cfg.color : '#ffffff'}
                 onChange={e => update({ color: e.target.value })}
-                style={{ width: '100%', height: 32, borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'none', cursor: 'pointer', padding: 2 }} />
+                style={{ width: '100%', height: 32, borderRadius: 8, border: '1px solid var(--border-light)', background: 'none', cursor: 'pointer', padding: 2 }} />
             </div>
             <div style={{ flexShrink: 0, marginTop: 14 }}>
               <button onClick={() => update({ showSeconds: !cfg.showSeconds })}
-                style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${cfg.showSeconds ? '#00b86055' : 'rgba(255,255,255,0.08)'}`, cursor: 'pointer', fontSize: 'var(--fs-md)', background: cfg.showSeconds ? '#00b86018' : 'rgba(255,255,255,0.04)', color: cfg.showSeconds ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: cfg.showSeconds ? 700 : 400 }}>
+                style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${cfg.showSeconds ? '#00b86055' : 'var(--bg-active)'}`, cursor: 'pointer', fontSize: 'var(--fs-md)', background: cfg.showSeconds ? '#00b86018' : 'rgba(255,255,255,0.04)', color: cfg.showSeconds ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: cfg.showSeconds ? 700 : 400 }}>
                 :ss
               </button>
             </div>

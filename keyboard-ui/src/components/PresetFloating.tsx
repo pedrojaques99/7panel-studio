@@ -5,7 +5,7 @@ import {
 } from '../lib/presets'
 
 const PANEL_DOTS: { key: keyof PanelVisibility; label: string; color: string }[] = [
-  { key: 'keys',       label: '⌨',  color: 'rgba(255,255,255,0.5)' },
+  { key: 'keys',       label: '⌨',  color: 'var(--text-50)' },
   { key: 'mixer',      label: '🎚', color: '#7c9ef5' },
   { key: 'soundboard', label: '🎹', color: '#a78bfa' },
   { key: 'obs',        label: '🎬', color: '#f87171' },
@@ -109,7 +109,7 @@ export function PresetFloating({ visibility, scale, onLoad }: Props) {
           }}>
             {presets.length === 0 && (
               <span style={{ fontSize: 'var(--fs-md)', color: 'rgba(255,255,255,0.2)', padding: '4px 8px' }}>
-                No presets yet
+                Nenhum preset ainda
               </span>
             )}
 
@@ -141,7 +141,7 @@ export function PresetFloating({ visibility, scale, onLoad }: Props) {
                       style={{
                         padding: '6px 8px', borderRadius: 9, cursor: 'pointer',
                         border: '1px solid rgba(255,255,255,0.08)',
-                        background: 'rgba(255,255,255,0.04)',
+                        background: 'var(--bg-hover)',
                         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
                         transition: 'all 0.12s', minWidth: 52,
                       }}
@@ -153,7 +153,7 @@ export function PresetFloating({ visibility, scale, onLoad }: Props) {
                           <div key={d.key} style={{ width: 5, height: 5, borderRadius: 2, background: d.color, opacity: 0.85 }} />
                         ))}
                         {activePanels.length === 0 && (
-                          <div style={{ width: 5, height: 5, borderRadius: 2, background: 'rgba(255,255,255,0.1)' }} />
+                          <div style={{ width: 5, height: 5, borderRadius: 2, background: 'var(--border-light)' }} />
                         )}
                       </div>
                       <span style={{
@@ -222,7 +222,7 @@ export function PresetFloating({ visibility, scale, onLoad }: Props) {
           <CtxItem onClick={() => { onLoad(ctxMenu.preset); setOpen(false); setCtxMenu(null) }}>▶ Load preset</CtxItem>
           <CtxItem onClick={() => handleOverwrite(ctxMenu.preset)}>↺ Overwrite with current</CtxItem>
           <CtxItem onClick={() => { setEditId(ctxMenu.preset.id); setEditName(ctxMenu.preset.name); setCtxMenu(null); setOpen(true) }}>✎ Rename</CtxItem>
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '2px 0' }} />
+          <div style={{ height: 1, background: 'var(--bg-hover)', margin: '2px 0' }} />
           <CtxItem danger onClick={() => handleDelete(ctxMenu.preset.id)}>✕ Delete</CtxItem>
         </div>
       )}
@@ -241,7 +241,7 @@ function CtxItem({ onClick, danger, children }: { onClick: () => void; danger?: 
         color: danger ? 'rgba(239,68,68,0.8)' : 'rgba(255,255,255,0.7)',
         fontSize: 'var(--fs-md)', fontWeight: 700, transition: 'all 0.1s',
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = danger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)' }}
+      onMouseEnter={e => { e.currentTarget.style.background = danger ? 'rgba(239,68,68,0.12)' : 'var(--bg-hover)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
       {children}

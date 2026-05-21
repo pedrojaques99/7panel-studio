@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
-import { API } from '../lib/api'
+import { API, resolveUrl } from '../lib/api'
 import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
@@ -11,8 +11,8 @@ type Config = { buttons?: Record<string, Action> }
 const field: React.CSSProperties = {
   width: '100%', padding: '10px 14px',
   borderRadius: 8,
-  border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid var(--border-light)',
+  background: 'var(--bg-hover)',
   color: '#fff', fontSize: 'var(--fs-xl)', outline: 'none',
   transition: 'border-color 0.15s',
 }
@@ -90,7 +90,7 @@ export function ConfigPanel({ selected, config, onClose, onSaved }: Props) {
   async function handleUpload(file: File) {
     const fd = new FormData(); fd.append('file', file)
     try {
-      const r = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
+      const r = await fetch(resolveUrl('/api/upload'), { method: 'POST', body: fd })
       const res = await r.json()
       if (res.status === 'success') {
         let type = actionType
@@ -105,15 +105,15 @@ export function ConfigPanel({ selected, config, onClose, onSaved }: Props) {
     if (!actionPath) return
     setConvertStatus('converting'); setConvertResult('')
     try {
-      const r = await fetch(`${API}/api/convert/wav-to-mp3`, {
+      const r = await fetch(resolveUrl('/api/convert/wav-to-mp3'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: actionPath, bitrate: convertBitrate }),
       })
       const res = await r.json()
-      if (!r.ok || res.error) { setConvertStatus('err'); setConvertResult(res.error || 'Error'); return }
+      if (!r.ok || res.error) { setConvertStatus('err'); setConvertResult(res.error || 'Erro'); return }
       // poll job
       const poll = async (jobId: string): Promise<void> => {
-        const sr = await fetch(`${API}/api/convert/status/${jobId}`)
+        const sr = await fetch(resolveUrl(`/api/convert/status/${jobId}`))
         const job = await sr.json()
         if (job.status === 'done') { setConvertStatus('ok'); setConvertResult(job.path) }
         else if (job.status === 'error') { setConvertStatus('err'); setConvertResult(job.error) }
@@ -222,8 +222,8 @@ appearance: 'none' as any }}
             {actionType === 'play_audio' && (
               <button onClick={togglePreview} disabled={!actionPath} style={{
                 ...btnBase, flex: 1,
-                background: previewing ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.07)',
-                color: previewing ? '#ef4444' : 'rgba(255,255,255,0.5)',
+                background: previewing ? 'rgba(239,68,68,0.2)' : 'var(--border-subtle)',
+                color: previewing ? '#ef4444' : 'var(--text-50)',
                 opacity: !actionPath ? 0.3 : 1,
               }}>
                 {previewing ? '⏹ Stop' : '▶ Preview'}
@@ -231,7 +231,7 @@ appearance: 'none' as any }}
             )}
             <button onClick={() => uploadRef.current?.click()} style={{
               ...btnBase, flex: 1,
-              background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.5)',
+              background: 'var(--border-subtle)', color: 'var(--text-50)',
             }}>↑ Upload</button>
             <input ref={uploadRef} type="file" accept=".mp3,.mp4,.wav,.ogg,.flac,.m4a,.ps1"
               style={{ display: 'none' }}
@@ -239,21 +239,21 @@ appearance: 'none' as any }}
           </div>
 
           {/* Advanced */}
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10 }}>
+          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 10 }}>
             <button onClick={() => setShowAdvanced(v => !v)} style={{
               width: '100%', background: 'none', border: 'none', cursor: 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 0',
             }}>
-              <span style={{ fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)' }}>Advanced</span>
+              <span style={{ fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--text-25)' }}>Advanced</span>
               <span style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.2)' }}>{showAdvanced ? '▲' : '▼'}</span>
             </button>
 
             {showAdvanced && (
               <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <span style={{ fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)' }}>WAV → MP3</span>
+                <span style={{ fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--text-25)' }}>WAV → MP3</span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1, fontSize: 'var(--fs-md)', padding: '8px 12px', borderRadius: 7, background: 'rgba(255,255,255,0.05)', color: actionPath ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {actionPath ? actionPath.split(/[\\/]/).pop() : 'No file selected'}
+                  <div style={{ flex: 1, fontSize: 'var(--fs-md)', padding: '8px 12px', borderRadius: 7, background: 'var(--bg-hover)', color: actionPath ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {actionPath ? actionPath.split(/[\\/]/).pop() : 'Nenhum arquivo selecionado'}
                   </div>
                   <select value={convertBitrate} onChange={e => setConvertBitrate(e.target.value)}
                     style={{ ...field, width: 76, padding: '8px 10px', fontSize: 'var(--fs-lg)' }}>
@@ -264,11 +264,11 @@ appearance: 'none' as any }}
                 </div>
                 <button onClick={convertWav} disabled={!actionPath || convertStatus === 'converting'} style={{
                   ...btnBase, width: '100%',
-                  background: convertStatus === 'ok' ? 'var(--status-ok)' : 'rgba(255,255,255,0.07)',
-                  color: convertStatus === 'ok' ? '#000' : 'rgba(255,255,255,0.5)',
+                  background: convertStatus === 'ok' ? 'var(--status-ok)' : 'var(--border-subtle)',
+                  color: convertStatus === 'ok' ? '#000' : 'var(--text-50)',
                   opacity: !actionPath || convertStatus === 'converting' ? 0.35 : 1,
                 }}>
-                  {convertStatus === 'converting' ? '// Converting…' : convertStatus === 'ok' ? '✓ Done' : '⇄ Convert to MP3'}
+                  {convertStatus === 'converting' ? '// Convertendo…' : convertStatus === 'ok' ? '✓ Pronto' : '⇄ Converter para MP3'}
                 </button>
                 {convertStatus === 'err' && <span style={{ fontSize: 'var(--fs-base)', color: '#ef4444' }}>{convertResult}</span>}
                 {convertStatus === 'ok' && convertResult && (

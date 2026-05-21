@@ -4,7 +4,7 @@ import { API } from '../lib/api'
 
 const defaultConfig: TimerConfig = {
   mode: 'stopwatch', countdownSecs: 3600,
-  color: 'rgba(255,255,255,0.5)', showSeconds: true,
+  color: 'var(--text-50)', showSeconds: true,
 }
 
 export function OverlayTimer() {
@@ -56,7 +56,7 @@ export function OverlayTimer() {
   }
 
   return (
-    <div style={{ fontFamily: "'Outfit', sans-serif", display: 'inline-block', padding: '6px 14px', background: 'rgba(14,15,17,0.6)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10 }}>
+    <div style={{ fontFamily: "'Outfit', sans-serif", display: 'inline-block', padding: '6px 14px', background: 'rgba(14,15,17,0.6)', backdropFilter: 'blur(16px)', border: '1px solid var(--border-subtle)', borderRadius: 10 }}>
       <span style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, letterSpacing: '0.12em', color: cfg.color, fontVariantNumeric: 'tabular-nums' }}>
         {formatTime(elapsed)}
       </span>

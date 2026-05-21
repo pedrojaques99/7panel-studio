@@ -51,7 +51,7 @@ export function PanelHeader({ title, onClose, children, className, noBorder }: P
       {captureId && (
         <div style={{
           width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-          background: captured ? '#ef4444' : 'rgba(255,255,255,0.1)',
+          background: captured ? '#ef4444' : 'var(--border-light)',
           boxShadow: captured ? '0 0 6px rgba(239,68,68,0.8)' : 'none',
           transition: 'background 0.2s, box-shadow 0.2s',
         }} />
@@ -79,6 +79,7 @@ export function PanelHeader({ title, onClose, children, className, noBorder }: P
           onMouseDown={e => e.stopPropagation()}
           onClick={onClose}
           style={closeBtnStyle}
+          aria-label="Close"
         >×</button>
       )}
     </div>

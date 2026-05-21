@@ -15,20 +15,20 @@ function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (
       onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = p.visible ? 'rgba(0,184,96,0.07)' : 'transparent' }}
     >
       <span style={{ fontSize: 'var(--fs-4xl)', width: 28, textAlign: 'center' }}>{p.icon}</span>
-      <span style={{ flex: 1, fontSize: 'var(--fs-xl)', color: p.visible ? '#fff' : 'rgba(255,255,255,0.6)', fontWeight: p.visible ? 600 : 400 }}>{p.label}</span>
+      <span style={{ flex: 1, fontSize: 'var(--fs-xl)', color: p.visible ? '#fff' : 'var(--text-60)', fontWeight: p.visible ? 600 : 400 }}>{p.label}</span>
       <span style={{
         fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
         padding: '3px 8px', borderRadius: 5,
-        background: p.visible ? 'rgba(0,184,96,0.15)' : 'rgba(255,255,255,0.05)',
-        color: p.visible ? '#00b860' : 'rgba(255,255,255,0.25)',
-      }}>{p.visible ? 'Open' : 'Closed'}</span>
+        background: p.visible ? 'rgba(0,184,96,0.15)' : 'var(--bg-hover)',
+        color: p.visible ? '#00b860' : 'var(--text-25)',
+      }}>{p.visible ? 'Aberto' : 'Fechado'}</span>
     </div>
   )
 }
 
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
-  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv'
+  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer'
 
 export type PanelDef = {
   id: PanelId
@@ -85,7 +85,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
     { label: 'Core',  ids: ['keys', 'mixer', 'soundboard'] },
     { label: 'Live',  ids: ['obs', 'ytchat', 'briefing', 'session', 'timer'] },
     { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab', 'visualizer'] },
-    { label: 'Tools', ids: ['converter', 'exporter'] },
+    { label: 'Tools', ids: ['converter', 'exporter', 'ytdl'] },
   ]
 
   const filteredAssets = assets.filter(a =>
@@ -112,14 +112,14 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
         style={{
           width: 480, maxHeight: '70vh',
           background: 'linear-gradient(160deg,#242527,#1a1b1d)',
-          border: '1px solid rgba(255,255,255,0.1)',
+          border: '1px solid var(--border-light)',
           borderRadius: 16,
           boxShadow: '0 40px 120px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.05)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
       >
         {/* Search input */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
           <span style={{ fontSize: 'var(--fs-3xl)', opacity: 0.4 }}>🔍</span>
           <input
             ref={inputRef}
@@ -131,11 +131,11 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
               color: '#fff', fontSize: 'var(--fs-2xl)', fontFamily: "'Outfit', sans-serif",
             }}
           />
-          <kbd style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.07)', padding: '3px 7px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.1)' }}>ESC</kbd>
+          <kbd style={{ fontSize: 'var(--fs-base)', color: 'var(--text-25)', background: 'var(--border-subtle)', padding: '3px 7px', borderRadius: 5, border: '1px solid var(--border-light)' }}>ESC</kbd>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)' }}>
           {([['panels', 'Panels'], ['files', 'Assets'], ['sidebar', 'Sidebar Config']] as const).map(([t, label]) => (
             <button key={t} onClick={() => { setTab(t); setQuery('') }} style={{
               flex: 1, padding: '8px 0', border: 'none', cursor: 'pointer',
@@ -144,18 +144,18 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
               color: tab === t ? '#fff' : 'rgba(255,255,255,0.35)',
               borderBottom: tab === t ? '2px solid rgba(255,255,255,0.4)' : '2px solid transparent',
               transition: 'all 0.12s',
-            }}>{label}</button>
+            }} aria-label={label}>{label}</button>
           ))}
         </div>
 
         {/* Content */}
-        <div style={{ overflowY: 'auto', flex: 1 }}>
+        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
           {/* Panels tab */}
           {tab === 'panels' && (
             <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {filteredPanels.length === 0 && (
-                <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>No panels found</div>
+                <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>Nenhum painel encontrado</div>
               )}
 
               {/* Grouped view when no query */}
@@ -180,11 +180,11 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
           {tab === 'files' && (
             <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {loadingAssets && (
-                <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>Loading...</div>
+                <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>Carregando...</div>
               )}
               {!loadingAssets && filteredAssets.length === 0 && (
                 <div style={{ padding: '20px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-lg)' }}>
-                  {assets.length === 0 ? 'No assets found' : 'No results'}
+                  {assets.length === 0 ? 'Nenhum arquivo encontrado' : 'Sem resultados'}
                 </div>
               )}
               {filteredAssets.map(a => {
@@ -205,7 +205,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
                     <span style={{ fontSize: 'var(--fs-3xl)', width: 28, textAlign: 'center' }}>{icon}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 'var(--fs-lg)', color: 'rgba(255,255,255,0.8)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
-                      <div style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.25)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{a.path}</div>
+                      <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-25)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{a.path}</div>
                     </div>
                     <span style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.2)', flexShrink: 0 }}>copy</span>
                   </div>
@@ -217,7 +217,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
           {/* Sidebar config tab */}
           {tab === 'sidebar' && (
             <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <div style={{ padding: '8px 12px 4px', fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.25)', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              <div style={{ padding: '8px 12px 4px', fontSize: 'var(--fs-base)', color: 'var(--text-25)', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
                 Toggle which panels show as icons in the sidebar
               </div>
               {panels.filter(p => p.label.toLowerCase().includes(q)).map(p => (
@@ -233,11 +233,11 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
                       padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
                       fontSize: 'var(--fs-md)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
                       background: p.sidebar ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
-                      color: p.sidebar ? '#fff' : 'rgba(255,255,255,0.25)',
-                      border: "1px solid rgba(255,255,255,0.07)",
+                      color: p.sidebar ? '#fff' : 'var(--text-25)',
+                      border: "1px solid var(--border-subtle)",
                       transition: 'all 0.12s',
                     }}
-                  >{p.sidebar ? '● Sidebar' : '○ Hidden'}</button>
+                   aria-label={p.sidebar ? "Hide from sidebar" : "Show in sidebar"}>{p.sidebar ? '● Sidebar' : '○ Hidden'}</button>
                 </div>
               ))}
             </div>
@@ -248,7 +248,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
         <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
           {[['↵', 'toggle panel'], ['click', 'copy path (assets)'], ['ESC', 'close']].map(([k, v]) => (
             <span key={k} style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.2)' }}>
-              <kbd style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '1px 5px', marginRight: 5 }}>{k}</kbd>
+              <kbd style={{ background: 'var(--border-subtle)', border: '1px solid var(--border-light)', borderRadius: 4, padding: '1px 5px', marginRight: 5 }}>{k}</kbd>
               {v}
             </span>
           ))}

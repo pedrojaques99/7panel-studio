@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { API } from '../lib/api'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { API, resolveUrl } from '../lib/api'
 import { PanelHeader } from '../lib/PanelHeader'
 import type { SbChannel } from '../lib/types'
 import { captureRegistry } from '../lib/capture-bus'
@@ -80,7 +80,7 @@ function VuMeter({ peak, muted }: { peak: number; muted: boolean }) {
         const on = i < active
         const isRed = i >= 20, isYellow = i >= 15 && i < 20
         const litColor = isRed ? '#ff1744' : isYellow ? '#ffd600' : 'var(--text-70)'
-        const deadColor = isRed ? '#2a0808' : isYellow ? '#1e1800' : 'rgba(255,255,255,0.05)'
+        const deadColor = isRed ? '#2a0808' : isYellow ? '#1e1800' : 'var(--bg-hover)'
         return <div key={i} style={{ width: 15, height: 4, borderRadius: 1.5, background: on ? litColor : deadColor, transition: 'background 50ms' }} />
       })}
     </div>
@@ -205,7 +205,7 @@ function ProgressBar({ current, duration, onSeek }: { current: number; duration:
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', mv) }
   }, [duration])
   return (
-    <div ref={ref} style={{ height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 99, position: 'relative', cursor: 'pointer' }}
+    <div ref={ref} style={{ height: 3, background: 'var(--bg-active)', borderRadius: 99, position: 'relative', cursor: 'pointer' }}
       onMouseDown={e => { drag.current = true; calc(e) }}>
       <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, background: 'rgba(255,255,255,0.45)', borderRadius: 99 }} />
       <div style={{ position: 'absolute', top: '50%', left: `${pct}%`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%', background: 'var(--bg-btn-silver)', border: '1px solid rgba(255,255,255,0.2)' }} />
@@ -229,7 +229,7 @@ function VolSlider({ value, onChange }: { value: number; onChange: (v: number) =
     return () => { window.removeEventListener('mouseup', up); window.removeEventListener('mousemove', mv) }
   }, [])
   return (
-    <div ref={ref} style={{ height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 99, position: 'relative', cursor: 'pointer', width: '100%' }}
+    <div ref={ref} style={{ height: 3, background: 'var(--bg-active)', borderRadius: 99, position: 'relative', cursor: 'pointer', width: '100%' }}
       onMouseDown={e => { drag.current = true; calc(e) }}>
       <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${value}%`, background: 'var(--status-ok)', borderRadius: 99 }} />
       <div style={{ position: 'absolute', top: '50%', left: `${value}%`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%', background: 'var(--bg-btn-silver)', border: '1px solid rgba(255,255,255,0.2)' }} />
@@ -352,10 +352,10 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
     let a = audioRef.current
     if (!a) {
       if (isYT) {
-        a = makeAudio(`${API}/api/yt-stream?url=${encodeURIComponent(path)}`, false)
+        a = makeAudio(resolveUrl(`/api/yt-stream?url=${encodeURIComponent(path)}`), false)
         streamUrlRef.current = a.src
       } else {
-        a = makeAudio(`${API}/api/preview?path=${encodeURIComponent(path)}`, true)
+        a = makeAudio(resolveUrl(`/api/preview?path=${encodeURIComponent(path)}`), true)
       }
     }
     onWillPlay(keyId)
@@ -389,7 +389,7 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
     return (
       <button onClick={toggle} title={label} style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px 6px 8px',
-        borderRadius: 10, border: `1px solid ${state.playing ? 'rgba(0,184,96,0.4)' : 'rgba(255,255,255,0.07)'}`,
+        borderRadius: 10, border: `1px solid ${state.playing ? 'rgba(0,184,96,0.4)' : 'var(--border-subtle)'}`,
         background: state.playing ? 'linear-gradient(135deg,rgba(0,184,96,0.15),rgba(0,184,96,0.05))' : 'rgba(255,255,255,0.04)',
         cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
         boxShadow: state.playing ? '0 0 12px rgba(0,184,96,0.15)' : 'none',
@@ -405,18 +405,18 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
     <div style={{
       borderRadius: 14,
       background: state.playing ? 'linear-gradient(160deg,rgba(0,184,96,0.08),rgba(255,255,255,0.02))' : 'rgba(255,255,255,0.025)',
-      border: `1px solid ${state.playing ? 'rgba(0,184,96,0.25)' : 'rgba(255,255,255,0.05)'}`,
+      border: `1px solid ${state.playing ? 'rgba(0,184,96,0.25)' : 'var(--bg-hover)'}`,
       boxShadow: state.playing ? '0 0 20px rgba(0,184,96,0.08)' : 'none',
       display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 12px 10px', minHeight: 148,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', fontWeight: 900, letterSpacing: '0.1em', padding: '2px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.07)', color: 'var(--text-40)', flexShrink: 0 }}>{keyName}</span>
-        <div style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: state.playing ? 'var(--status-ok)' : 'rgba(255,255,255,0.1)', boxShadow: state.playing ? '0 0 6px rgba(0,184,96,0.7)' : 'none' }} />
+        <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', fontWeight: 900, letterSpacing: '0.1em', padding: '2px 5px', borderRadius: 4, background: 'var(--border-subtle)', color: 'var(--text-40)', flexShrink: 0 }}>{keyName}</span>
+        <div style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: state.playing ? 'var(--status-ok)' : 'var(--border-light)', boxShadow: state.playing ? '0 0 6px rgba(0,184,96,0.7)' : 'none' }} />
         {editing ? (
           <input ref={inputRef} value={editVal} onChange={e => setEditVal(e.target.value)}
             onBlur={commitEdit}
             onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditing(false) }}
-            style={{ flex: 1, fontSize: 'var(--fs-md)', fontWeight: 700, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, color: 'var(--text-pure)', padding: '1px 5px', outline: 'none', minWidth: 0 }}
+            style={{ flex: 1, fontSize: 'var(--fs-md)', fontWeight: 700, background: 'var(--bg-active)', border: '1px solid var(--border-light)', borderRadius: 4, color: 'var(--text-pure)', padding: '1px 5px', outline: 'none', minWidth: 0 }}
           />
         ) : (
           <span onDoubleClick={startEdit} title={`${path} — dbl-click para renomear`}
@@ -424,7 +424,7 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
             {label}
           </span>
         )}
-        <button onClick={onHide} title="Esconder" style={{ width: 16, height: 16, borderRadius: 4, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 'var(--fs-md)', padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
+        <button onClick={onHide} title="Esconder" aria-label="Hide deck" style={{ width: 16, height: 16, borderRadius: 4, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 'var(--fs-md)', padding: 0, flexShrink: 0, lineHeight: 1 }}>×</button>
       </div>
       {state.playing && <Visualizer audioEl={audioRef.current} mock={isYT} volume={state.volume} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -436,7 +436,7 @@ function Deck({ keyId, action, buttonMode, onKeyRef, onSyncRef, onWillPlay, regi
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button onClick={toggle} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0, background: state.playing ? 'var(--status-ok)' : 'var(--bg-btn-silver)', color: state.playing ? '#000' : 'rgba(255,255,255,0.85)', fontSize: 'var(--fs-lg)', boxShadow: 'var(--shadow-btn)', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button onClick={toggle} aria-label={state.playing ? "Pause" : "Play"} style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0, background: state.playing ? 'var(--status-ok)' : 'var(--bg-btn-silver)', color: state.playing ? '#000' : 'rgba(255,255,255,0.85)', fontSize: 'var(--fs-lg)', boxShadow: 'var(--shadow-btn)', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {resolving ? '⏳' : state.playing ? '⏸' : '▶'}
         </button>
         <div style={{ flex: 1 }}>
@@ -463,7 +463,7 @@ const SbStrip = React.memo(function SbStrip({ ch }: { ch: SbChannel }) {
       <VuMeter peak={peak} muted={false} />
       <VerticalSlider value={ch.volume / 100} onChange={v => ch.setVolume(Math.round(v * 100))} />
       <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-70)', fontFamily: 'monospace', fontWeight: 'bold' }}>{ch.volume}%</span>
-      <button onClick={ch.stop} style={{
+      <button onClick={ch.stop} aria-label="Stop" style={{
         width: 54, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
         fontSize: 'var(--fs-base)', fontWeight: 900, letterSpacing: '0.06em', textTransform: 'uppercase',
         background: 'var(--status-ok)', color: '#000', boxShadow: 'var(--shadow-btn)',
@@ -509,7 +509,7 @@ const ChannelStrip = React.memo(function ChannelStrip({ s, onVolume, onMute, onH
       background: 'var(--bg-key-off)', boxShadow: 'var(--shadow-key-off)', position: 'relative',
       opacity: s.inactive ? 0.45 : 1, transition: 'opacity 300ms',
     }}>
-      <button onClick={() => onHide(s.name)} style={{
+      <button onClick={() => onHide(s.name)} aria-label="Hide channel" style={{
         position: 'absolute', top: 8, right: 8, background: 'none', border: 'none', cursor: 'pointer',
         color: 'var(--text-20)', fontSize: 'var(--fs-lg)', padding: 3, lineHeight: 1, transition: 'color 120ms',
       }}
@@ -522,7 +522,7 @@ const ChannelStrip = React.memo(function ChannelStrip({ s, onVolume, onMute, onH
       <VerticalSlider value={s.volume} onChange={v => onVolume(s.pid, v)} disabled={s.muted} />
       <span style={{ fontSize: 'var(--fs-lg)', color: s.muted ? 'var(--text-20)' : 'var(--text-70)', fontFamily: 'monospace', fontWeight: 'bold' }}>{pct}%</span>
       {s.is_input && (
-        <button onClick={mic.toggle} title="Monitor mic input" style={{
+        <button onClick={mic.toggle} title="Monitor mic input" aria-label={mic.active ? "Disable mic monitor" : "Enable mic monitor"} style={{
           width: 54, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
           fontSize: 'var(--fs-base)', fontWeight: 900, letterSpacing: '0.06em', textTransform: 'uppercase',
           transition: 'all 100ms', color: mic.active ? '#000' : 'var(--text-40)',
@@ -530,7 +530,7 @@ const ChannelStrip = React.memo(function ChannelStrip({ s, onVolume, onMute, onH
           boxShadow: 'var(--shadow-btn)', transform: mic.active ? 'translateY(3px)' : undefined,
         }}>👂</button>
       )}
-      <button onClick={() => onMute(s.pid, !s.muted)} style={{
+      <button onClick={() => onMute(s.pid, !s.muted)} aria-label={s.muted ? "Unmute" : "Mute"} style={{
         width: 54, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer',
         fontSize: 'var(--fs-base)', fontWeight: 900, letterSpacing: '0.06em', textTransform: 'uppercase',
         transition: 'all 100ms', color: '#000',
@@ -550,7 +550,7 @@ const ChannelStrip = React.memo(function ChannelStrip({ s, onVolume, onMute, onH
 })
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
-export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [], dragHandleClass, onRenameKey, onRegisterToggler, onRegisterSyncer, onPlayStateChange, onDeckStateChange, onRegisterVolumer }: {
+export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [], dragHandleClass, onRenameKey, onRegisterToggler, onRegisterSyncer, onPlayStateChange, onDeckStateChange, onRegisterVolumer, onMinimizedChange }: {
   onClose?: () => void
   config?: Config
   sbChannels?: SbChannel[]
@@ -561,7 +561,26 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
   onPlayStateChange?: (keyId: string, playing: boolean) => void
   onDeckStateChange?: (keyId: string, s: DeckPublicState) => void
   onRegisterVolumer?: (keyId: string, fn: (v: number) => void) => void
+  onMinimizedChange?: (minimized: boolean) => void
 }) {
+  // ── Mini/Max mode ──
+  const [minimized, setMinimized] = useState(() => localStorage.getItem('mixer-minimized') === 'true')
+  const [activeDeckStates, setActiveDeckStates] = useState<Record<string, DeckState>>({})
+  const [masterVolume, setMasterVolume] = useState(() => {
+    const saved = localStorage.getItem('mixer-master-volume')
+    return saved ? Number(saved) : 80
+  })
+  const masterVolumeRef = useRef(masterVolume)
+
+  const toggleMinimized = useCallback(() => {
+    setMinimized(prev => {
+      const next = !prev
+      localStorage.setItem('mixer-minimized', String(next))
+      onMinimizedChange?.(next)
+      return next
+    })
+  }, [onMinimizedChange])
+
   // ── System session state ──
   const [sessions, setSessions] = useState<AudioSession[]>([])
   const [hiddenSys, setHiddenSys] = useState<string[]>(() => {
@@ -730,6 +749,29 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // ── Master volume ──
+  useEffect(() => {
+    masterVolumeRef.current = masterVolume
+    localStorage.setItem('mixer-master-volume', String(masterVolume))
+  }, [masterVolume])
+
+  // ── Track active deck states for mini mode ──
+  const handleDeckStateForMini = useCallback((id: string, s: DeckPublicState) => {
+    setActiveDeckStates(prev => ({ ...prev, [id]: s as DeckState }))
+    onDeckStateChange?.(id, s)
+  }, [onDeckStateChange])
+
+  const playingDeck = useMemo(() => {
+    const entries = Object.entries(activeDeckStates)
+    return entries.find(([, s]) => s.playing) || entries[0] || null
+  }, [activeDeckStates])
+
+  const handleMiniToggle = useCallback(() => {
+    if (!playingDeck) return
+    const [id] = playingDeck
+    togglersRef.current[id]?.()
+  }, [playingDeck])
+
   // ── Derived ──
   const allDecks = Object.entries(config.buttons ?? {}).filter(([, a]) => a.type === 'play_audio' && a.path)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -744,6 +786,96 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _hasSystem = visibleSessions.length > 0 || sbChannels.length > 0
 
+  const isPlaying = playingDeck ? playingDeck[1].playing : false
+  const playingLabel = playingDeck
+    ? (labels[playingDeck[0]] || allDecks.find(([id]) => id === playingDeck[0])?.[1]?.label || playingDeck[0])
+    : null
+
+  // ── Mini mode ──
+  if (minimized) {
+    return (
+      <CaptureIdContext.Provider value="soundtrack">
+      <div style={{
+        borderRadius: 12, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.5)', border: '1px solid var(--border-light)',
+        display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0,
+      }}>
+        {/* Hidden deck engines */}
+        <div style={{ display: 'none' }}>
+          {allDecks.map(([keyId, action]) => (
+            <Deck
+              key={keyId} keyId={keyId}
+              action={{ ...action, label: labels[keyId] || action.label }}
+              buttonMode={false}
+              onKeyRef={handleKeyRef} onSyncRef={handleSyncRef}
+              onWillPlay={handleWillPlay} registerPause={handleRegisterPause}
+              onHide={() => {}} onRename={name => { setLabels(l => ({ ...l, [keyId]: name })); onRenameKey?.(keyId, name) }}
+              onStateChange={handleDeckStateForMini}
+              onVolumeRef={onRegisterVolumer}
+            />
+          ))}
+        </div>
+
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '10px 12px',
+          userSelect: 'none',
+        }}>
+          {/* Play/Pause */}
+          <button onClick={handleMiniToggle} onMouseDown={e => e.stopPropagation()} aria-label={isPlaying ? "Pause" : "Play"} style={{
+            width: 28, height: 28, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0,
+            background: isPlaying ? 'var(--status-ok)' : 'var(--bg-btn-silver)',
+            color: isPlaying ? '#000' : 'rgba(255,255,255,0.85)',
+            fontSize: 'var(--fs-md)', boxShadow: 'var(--shadow-btn)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isPlaying ? '⏸' : '▶'}
+          </button>
+
+          {/* Track name */}
+          <span style={{
+            fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-40)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            flex: 1, minWidth: 0,
+          }}>
+            {playingLabel || '// Audio'}
+          </span>
+
+          {/* Volume — stopPropagation prevents drag conflict with panel handle */}
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-20)', flexShrink: 0 }}>🔊</span>
+          <div style={{ width: 60, flexShrink: 0 }} onMouseDown={e => e.stopPropagation()}>
+            <VolSlider value={masterVolume} onChange={v => {
+              setMasterVolume(v)
+              sessions.forEach(s => { if (s.pid !== -1) handleVolume(s.pid, v / 100) })
+            }} />
+          </div>
+          <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', color: 'var(--text-20)', width: 24, textAlign: 'right', flexShrink: 0 }}>{masterVolume}</span>
+
+          {/* Status dot */}
+          <div style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: available === null ? '#555' : available ? 'var(--status-ok)' : 'var(--status-err)' }} />
+
+          {/* Maximize button */}
+          <button onClick={toggleMinimized} title="Maximizar" aria-label="Maximize" onMouseDown={e => e.stopPropagation()} style={{
+            width: 22, height: 22, borderRadius: 4, border: '1px solid var(--border-light)',
+            background: 'var(--bg-hover)', color: 'var(--text-40)', cursor: 'pointer',
+            fontSize: 'var(--fs-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>⬜</button>
+
+          {/* Close */}
+          {onClose && (
+            <button onClick={onClose} onMouseDown={e => e.stopPropagation()} aria-label="Close" style={{
+              width: 22, height: 22, borderRadius: 4, border: 'none',
+              background: 'transparent', color: 'var(--text-20)', cursor: 'pointer',
+              fontSize: 'var(--fs-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>×</button>
+          )}
+        </div>
+      </div>
+      </CaptureIdContext.Provider>
+    )
+  }
+
+  // ── Full mode ──
   return (
     <CaptureIdContext.Provider value="soundtrack">
     <div style={{
@@ -754,11 +886,17 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
         {hiddenSessionItems.length > 0 && (
           <button onClick={() => setShowHiddenSys(p => !p)} style={{
             fontSize: 'var(--fs-sm)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-            background: showHiddenSys ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.1)', borderRadius: 'var(--radius-xs)',
+            background: showHiddenSys ? 'rgba(255,255,255,0.12)' : 'var(--bg-hover)',
+            border: '1px solid var(--border-light)', borderRadius: 'var(--radius-xs)',
             color: 'var(--text-40)', padding: '3px 7px', cursor: 'pointer',
           }}>{hiddenSessionItems.length} hidden</button>
         )}
+        {/* Minimize button */}
+        <button onClick={toggleMinimized} title="Minimizar" aria-label="Minimize" onMouseDown={e => e.stopPropagation()} style={{
+          width: 22, height: 22, borderRadius: 4, border: '1px solid var(--border-light)',
+          background: 'var(--bg-hover)', color: 'var(--text-40)', cursor: 'pointer',
+          fontSize: 'var(--fs-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>⬒</button>
         <div style={{ width: 8, height: 8, borderRadius: '50%', background: available === null ? '#555' : available ? 'var(--status-ok)' : 'var(--status-err)' }} />
       </PanelHeader>
 
@@ -772,7 +910,7 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
             onKeyRef={handleKeyRef} onSyncRef={handleSyncRef}
             onWillPlay={handleWillPlay} registerPause={handleRegisterPause}
             onHide={() => {}} onRename={name => { setLabels(l => ({ ...l, [keyId]: name })); onRenameKey?.(keyId, name) }}
-            onStateChange={onDeckStateChange}
+            onStateChange={handleDeckStateForMini}
             onVolumeRef={onRegisterVolumer}
           />
         ))}
@@ -793,10 +931,10 @@ export function AudioMixer({ onClose, config = { buttons: {} }, sbChannels = [],
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 20px 0' }}>
           <div style={{ fontSize: 'var(--fs-sm)', letterSpacing: '0.3em', color: 'var(--text-40)', textTransform: 'uppercase' }}>Hidden</div>
           {hiddenSessionItems.map(s => (
-            <div key={s.display_name} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '6px 10px' }}>
+            <div key={s.display_name} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-hover)', borderRadius: 6, padding: '6px 10px' }}>
               <span style={{ fontSize: 'var(--fs-3xl)' }}>{icon(s.display_name, s.name, s.is_input)}</span>
               <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-40)', flex: 1 }}>{s.display_name}</span>
-              <button onClick={() => handleUnhideSys(s.name)} style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, color: 'var(--text-40)', padding: '2px 7px', cursor: 'pointer' }}>Show</button>
+              <button onClick={() => handleUnhideSys(s.name)} style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, background: 'var(--bg-active)', border: '1px solid var(--border-light)', borderRadius: 4, color: 'var(--text-40)', padding: '2px 7px', cursor: 'pointer' }}>Show</button>
             </div>
           ))}
         </div>

@@ -3,7 +3,7 @@ import { Rnd } from 'react-rnd'
 import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
-import { API } from '../lib/api'
+import { API, resolveUrl } from '../lib/api'
 
 const PANEL_ID = 'session'
 const DEF_GEO = { x: 500, y: 60, w: 520, h: 0 }
@@ -31,7 +31,7 @@ async function getFileDuration(file: File): Promise<number> {
 async function uploadFile(file: File): Promise<string> {
   const fd = new FormData()
   fd.append('file', file)
-  const r = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
+  const r = await fetch(resolveUrl('/api/upload'), { method: 'POST', body: fd })
   const res = await r.json()
   if (res.status !== 'success') throw new Error(res.error || 'Upload failed')
   return res.path as string
@@ -117,7 +117,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
       setProgress(5)
 
       const outputName = tracks[0].name.replace(/\.[^.]+$/, '') + '_session'
-      const r = await fetch(`${API}/api/session/build`, {
+      const r = await fetch(resolveUrl('/api/session/build'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -136,7 +136,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
       const jobId = res.job_id as string
       pollRef.current = setInterval(async () => {
         try {
-          const sr = await fetch(`${API}/api/convert/status/${jobId}`)
+          const sr = await fetch(resolveUrl(`/api/convert/status/${jobId}`))
           const job = await sr.json()
           setProgress(job.progress ?? 0)
           if (job.status === 'done') {
@@ -208,7 +208,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
                     display: 'flex', alignItems: 'center', gap: 6,
                     padding: '7px 10px', borderRadius: 'var(--radius-sm)',
                     background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.07)',
+                    border: '1px solid var(--border-subtle)',
                   }}>
                     <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-20)', fontFamily: 'monospace', minWidth: 20, flexShrink: 0 }}>
                       {String(idx + 1).padStart(2, '0')}
@@ -232,7 +232,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
             <DropZone
-              label={tracks.length > 0 ? '+ Add more tracks' : 'Drop audio files here or click to browse'}
+              label={tracks.length > 0 ? '+ Adicionar mais faixas' : 'Solte os áudios aqui ou clique para buscar'}
               hint="MP3 · WAV · WEBM · OGG · M4A · FLAC"
               icon="🎵"
               active={trackDrop}
@@ -284,8 +284,8 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
               </span>
               <div style={{
                 width: 36, height: 18, borderRadius: 99, position: 'relative',
-                background: psEnabled ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.08)',
-                border: `1px solid ${psEnabled ? 'rgba(139,92,246,0.6)' : 'rgba(255,255,255,0.1)'}`,
+                background: psEnabled ? 'rgba(139,92,246,0.5)' : 'var(--bg-active)',
+                border: `1px solid ${psEnabled ? 'rgba(139,92,246,0.6)' : 'var(--border-light)'}`,
                 transition: 'all 0.15s', flexShrink: 0,
               }}>
                 <div style={{
@@ -363,7 +363,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
               </div>
             ) : (
               <DropZone
-                label="Drop image or video here"
+                label="Solte imagem ou vídeo aqui"
                 hint="JPG · PNG · MP4 · WEBM (video loops without audio)"
                 icon="🖼️"
                 active={visualDrop}
@@ -388,11 +388,11 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 'var(--fs-base)', color: 'var(--text-40)', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-                  {status === 'uploading' ? 'Uploading files' : 'Building MP4'}
+                  {status === 'uploading' ? 'Enviando arquivos' : 'Gerando MP4'}
                 </span>
                 <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: '#8b5cf6', fontVariantNumeric: 'tabular-nums' }}>{progress}%</span>
               </div>
-              <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+              <div style={{ height: 6, borderRadius: 4, background: 'var(--border-subtle)', overflow: 'hidden' }}>
                 <div style={{
                   height: '100%', borderRadius: 4,
                   background: 'linear-gradient(90deg, #8b5cf6, #6d28d9)',
@@ -429,17 +429,17 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
               transition: 'all 0.15s',
             }}
           >
-            {status === 'done' ? '✓ Done — Build Another' :
-             status === 'error' ? '✕ Error — Try Again' :
-             busy ? `⟳ ${status === 'uploading' ? 'Uploading…' : `Building… ${progress}%`}` :
-             '▶ Build Session MP4'}
+            {status === 'done' ? '✓ Pronto — Gerar Outro' :
+             status === 'error' ? '✕ Erro — Tentar Novamente' :
+             busy ? `⟳ ${status === 'uploading' ? 'Enviando…' : `Gerando… ${progress}%`}` :
+             '▶ Gerar Session MP4'}
           </button>
 
           {/* ── Result ── */}
           {status === 'done' && resultPath && (
             <div style={{ background: 'rgba(0,184,96,0.07)', border: '1px solid rgba(0,184,96,0.2)', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 'var(--fs-base)', color: '#00b860', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Saved</div>
-              <div style={{ fontSize: 'var(--fs-md)', color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all', fontFamily: 'monospace' }}>{resultPath}</div>
+              <div style={{ fontSize: 'var(--fs-base)', color: '#00b860', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Salvo</div>
+              <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-50)', wordBreak: 'break-all', fontFamily: 'monospace' }}>{resultPath}</div>
               <button
                 onMouseDown={e => e.stopPropagation()}
                 onClick={() => fetch(`${API}/api/open-explorer`, {
@@ -447,7 +447,7 @@ export function SessionPanel({ onClose }: { onClose: () => void }) {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ path: resultPath }),
                 })}
-                style={{ alignSelf: 'flex-start', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', fontSize: 'var(--fs-md)', fontWeight: 600, cursor: 'pointer' }}
+                style={{ alignSelf: 'flex-start', padding: '5px 12px', border: '1px solid var(--border-light)', borderRadius: 7, background: 'var(--bg-hover)', color: 'var(--text-60)', fontSize: 'var(--fs-md)', fontWeight: 600, cursor: 'pointer' }}
               >📂 Open in Explorer</button>
             </div>
           )}
@@ -481,7 +481,7 @@ function DropZone({ label, hint, icon, active, compact, onDragOver, onDragLeave,
       onDrop={e => { e.preventDefault(); onDrop(Array.from(e.dataTransfer.files)) }}
       onClick={onClick}
       style={{
-        border: `2px dashed ${active ? '#8b5cf6' : 'rgba(255,255,255,0.1)'}`,
+        border: `2px dashed ${active ? '#8b5cf6' : 'var(--border-light)'}`,
         borderRadius: 'var(--radius-sm)',
         padding: compact ? '10px 16px' : '24px 16px',
         textAlign: 'center', cursor: 'pointer',
@@ -506,7 +506,7 @@ function MiniBtn({ onClick, disabled, danger, children }: {
       disabled={disabled}
       style={{
         width: 22, height: 22,
-        border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.08)'}`,
+        border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : 'var(--bg-active)'}`,
         borderRadius: 4,
         background: 'rgba(255,255,255,0.03)',
         color: danger ? 'rgba(239,68,68,0.75)' : 'var(--text-40)',

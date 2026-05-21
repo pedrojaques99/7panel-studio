@@ -361,17 +361,17 @@ const [_playProgress, setPlayProgress] = useState(0)
                 inp.click()
               }}
               style={{
-                border: `2px dashed ${isDrop ? '#00b860' : 'rgba(255,255,255,0.1)'}`,
+                border: `2px dashed ${isDrop ? '#00b860' : 'var(--border-light)'}`,
                 borderRadius: 'var(--radius-sm)', padding: '36px 20px', textAlign: 'center',
                 cursor: 'pointer', transition: 'all 0.15s',
                 background: isDrop ? 'rgba(0,184,96,0.05)' : 'transparent',
               }}
             >
               {loading
-                ? <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-40)' }}>Decoding audio…</span>
+                ? <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-40)' }}>Decodificando áudio…</span>
                 : <>
                   <div style={{ fontSize: 'var(--fs-7xl)', marginBottom: 8 }}>🎵</div>
-                  <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-40)', fontWeight: 600 }}>Drop audio file or click to browse</div>
+                  <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-40)', fontWeight: 600 }}>Solte o áudio aqui ou clique para buscar</div>
                   <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-20)', marginTop: 4 }}>MP3 · WAV · OGG · FLAC · M4A</div>
                 </>
               }
@@ -389,7 +389,7 @@ const [_playProgress, setPlayProgress] = useState(0)
                 <button
                   onMouseDown={e => e.stopPropagation()}
                   onClick={() => { stop(); setAudioBuffer(null); setFileName('') }}
-                  style={{ fontSize: 'var(--fs-sm)', padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.1)', background: 'transparent', color: 'var(--text-40)', cursor: 'pointer', flexShrink: 0 }}
+                  style={{ fontSize: 'var(--fs-sm)', padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-40)', cursor: 'pointer', flexShrink: 0 }}
                 >Replace</button>
               </div>
 
@@ -486,7 +486,7 @@ const [_playProgress, setPlayProgress] = useState(0)
                 </div>
                 {exporting === 'render' && (
                   <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-40)', marginTop: 8, textAlign: 'center', fontStyle: 'italic' }}>
-                    Rendering offline… this may take a moment
+                    Renderizando offline… pode demorar um momento
                   </div>
                 )}
               </div>

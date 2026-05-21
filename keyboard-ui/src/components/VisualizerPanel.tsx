@@ -193,6 +193,7 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
   const [sources, setSources] = useState<CaptureSource[]>([])
   const [fullscreen, setFullscreen] = useState(false)
   const [showParams, setShowParams] = useState(false)
+  const [cycleMode, setCycleMode] = useState<'off' | 'beat' | number>('off')
   const containerRef = useRef<HTMLDivElement>(null)
 
   const particlesRef = useRef<GrowthParticle[]>([])
@@ -201,6 +202,8 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
   const analyserRef = useRef<{ analyser: AnalyserNode; ctx: AudioContext; cleanup: () => void } | null>(null)
   const dataRef = useRef<Uint8Array<ArrayBuffer>>(new Uint8Array(0))
   const smoothRef = useRef({ subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, high: 0, volume: 0 })
+  const beatCooldownRef = useRef(0)
+  const lastCycleTimeRef = useRef(0)
 
   // Sync sources from capture registry
   useEffect(() => {
@@ -231,6 +234,31 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (connected && sources.length > 0) connect()
   }, [sources])
+
+  const modeKeys = Object.keys(PRESETS) as Mode[]
+  const cycleNext = useCallback(() => {
+    setCfg(prev => {
+      const idx = modeKeys.indexOf(prev.mode)
+      const next = modeKeys[(idx + 1) % modeKeys.length]
+      return PRESETS[next]
+    })
+    const c = canvasRef.current; if (!c) return
+    const ctx2d = c.getContext('2d'); if (!ctx2d) return
+    ctx2d.fillStyle = '#0a0a0a'
+    ctx2d.fillRect(0, 0, c.width, c.height)
+    noiseRef.current = createNoise2D()
+    particlesRef.current = Array.from({ length: 3 }, () => {
+      const a = Math.random() * Math.PI * 2
+      return new GrowthParticle(c.width / 2 + (Math.random() - 0.5) * 60, c.height / 2 + (Math.random() - 0.5) * 60, Math.cos(a), Math.sin(a), 400)
+    })
+  }, [])
+
+  // Timer-based cycle
+  useEffect(() => {
+    if (typeof cycleMode !== 'number') return
+    const iv = setInterval(cycleNext, cycleMode * 1000)
+    return () => clearInterval(iv)
+  }, [cycleMode, cycleNext])
 
   // Seed particles
   const reset = useCallback(() => {
@@ -267,6 +295,16 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
           volume: lerp(s.volume, raw.volume, t),
         }
         const b = smoothRef.current, se = cfg.sensitivity
+
+        // Beat-triggered cycle: detect strong bass transient
+        if (cycleMode === 'beat' && raw.bass > 0.75 && raw.bass - s.bass > 0.2) {
+          const now = performance.now()
+          if (now - beatCooldownRef.current > 2000) {
+            beatCooldownRef.current = now
+            cycleNext()
+          }
+        }
+
         live = {
           ...cfg,
           speed: cfg.speed + b.bass * 3 * se,
@@ -364,7 +402,7 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
   const s: React.CSSProperties = {
     display: 'flex', flexDirection: 'column', height: '100%',
     background: '#0a0a0a', borderRadius: 14, overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,0.06)',
+    border: '1px solid var(--border-subtle)',
   }
 
   const inner = (
@@ -372,14 +410,15 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
       <PanelHeader title="Visualizer" onClose={onClose} />
 
       {/* Controls row */}
-      <div style={{ display: 'flex', gap: 6, padding: '6px 10px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, padding: '6px 10px', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
         {/* Connect button */}
         <button
           onClick={() => connected ? disconnect() : connect()}
+          aria-label={connected ? "Disconnect" : "Connect"}
           style={{
             padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
             fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-            background: connected ? '#00b860' : 'rgba(255,255,255,0.08)', color: connected ? '#000' : 'rgba(255,255,255,0.6)',
+            background: connected ? '#00b860' : 'var(--bg-active)', color: connected ? '#000' : 'var(--text-60)',
             transition: 'all 0.2s',
           }}
         >
@@ -398,7 +437,7 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
           <button key={k} onClick={() => { setCfg(PRESETS[k]); reset() }}
             style={{
               padding: '3px 8px', borderRadius: 5, border: '1px solid',
-              borderColor: cfg.mode === k ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.06)',
+              borderColor: cfg.mode === k ? 'rgba(255,255,255,0.3)' : 'var(--bg-hover)',
               background: cfg.mode === k ? 'rgba(255,255,255,0.1)' : 'transparent',
               color: cfg.mode === k ? '#fff' : 'rgba(255,255,255,0.4)',
               fontSize: 10, cursor: 'pointer', fontWeight: 600,
@@ -417,22 +456,37 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
         <button onClick={() => setShowParams(p => !p)} style={{
           background: showParams ? 'rgba(139,92,246,0.2)' : 'none', border: showParams ? '1px solid rgba(139,92,246,0.4)' : 'none',
           color: showParams ? '#8b5cf6' : 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 10, borderRadius: 5, padding: '3px 6px', fontWeight: 600,
-        }}>☰</button>
+        }} aria-label="Toggle parameters">☰</button>
 
         {/* Fullscreen */}
-        <button onClick={toggleFs} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }}>
+        <button onClick={toggleFs} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }}>
           {fullscreen ? '⊟' : '⊞'}
         </button>
 
         {/* Reset */}
-        <button onClick={reset} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }}>↺</button>
+        <button onClick={reset} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 14 }} aria-label="Reset">↺</button>
+
+        {/* Auto-cycle */}
+        <button
+          onClick={() => setCycleMode(m => m === 'off' ? 'beat' : m === 'beat' ? 10 : m === 10 ? 20 : m === 20 ? 30 : 'off')}
+          style={{
+            padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+            border: '1px solid',
+            borderColor: cycleMode !== 'off' ? 'rgba(139,92,246,0.5)' : 'var(--bg-hover)',
+            background: cycleMode !== 'off' ? 'rgba(139,92,246,0.15)' : 'transparent',
+            color: cycleMode !== 'off' ? '#a78bfa' : 'rgba(255,255,255,0.4)',
+          }}
+          title="Auto-cycle modes: off → beat → 10s → 20s → 30s"
+        >
+          {cycleMode === 'off' ? '⟳ Off' : cycleMode === 'beat' ? '⟳ Beat' : `⟳ ${cycleMode}s`}
+        </button>
       </div>
 
       {/* Parameter controls drawer */}
       {showParams && (
         <div className="no-drag" style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '2px 10px',
-          padding: '6px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+          padding: '6px 10px', borderBottom: '1px solid var(--border-subtle)',
           background: 'rgba(0,0,0,0.4)', maxHeight: 160, overflowY: 'auto',
         }}>
           {([
@@ -452,7 +506,7 @@ export function VisualizerPanel({ onClose }: { onClose: () => void }) {
             ['friction', 0.9, 1, 0.005],
             ['sensitivity', 0.1, 3, 0.1],
           ] as [keyof VisConfig, number, number, number][]).map(([key, min, max, step]) => (
-            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'rgba(255,255,255,0.5)', fontFamily: 'monospace' }}>
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--text-50)', fontFamily: 'monospace' }}>
               <span style={{ width: 52, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{key.slice(0, 7)}</span>
               <input type="range" min={min} max={max} step={step} value={cfg[key] as number}
                 onChange={e => setCfg(p => ({ ...p, [key]: parseFloat(e.target.value) }))}

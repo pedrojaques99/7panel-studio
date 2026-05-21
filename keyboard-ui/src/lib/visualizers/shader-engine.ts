@@ -39,24 +39,18 @@ export class ShaderEngine {
 
   init(canvas: HTMLCanvasElement, fragSrc: string): boolean {
     let gl = this.gl
-    if (!gl || this.canvas !== canvas) {
-      // Try to reuse existing context on the same canvas (avoids context limit exhaustion)
-      gl = canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false })
-      if (!gl) {
-        // Context lost or limit reached — force-release old context and retry
-        if (this.gl) {
-          const ext = this.gl.getExtension('WEBGL_lose_context')
-          if (ext) ext.loseContext()
-          this.gl = null
-        }
-        gl = canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false })
-        if (!gl) {
-          console.warn('WebGL context null — canvas:', canvas.width, 'x', canvas.height, 'connected:', canvas.isConnected)
-          return false
-        }
+    const needNew = !gl || this.canvas !== canvas || gl.isContextLost()
+    if (needNew) {
+      if (this.gl) {
+        const ext = this.gl.getExtension('WEBGL_lose_context')
+        if (ext) ext.loseContext()
+        this.gl = null
       }
+      gl = canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false })
+      if (!gl) return false
       this.gl = gl
       this.canvas = canvas
+      this.program = null
 
       const buf = gl.createBuffer()
       gl.bindBuffer(gl.ARRAY_BUFFER, buf)

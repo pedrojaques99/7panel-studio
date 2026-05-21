@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Rnd } from 'react-rnd'
 import * as Tone from 'tone'
-import { API } from '../lib/api'
+import { API, resolveUrl } from '../lib/api'
 import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
@@ -76,7 +76,7 @@ function NoteKeyboard({ activeNote, onPlay, onRecord }: {
               title={`${n} [${keys[i]}]${onRecord ? ' · right-click to record' : ''}`}
               style={{
                 flex: 1, minWidth: 0, padding: '5px 2px', border: 'none', borderRadius: 5, cursor: 'pointer',
-                background: activeNote === n ? 'var(--status-ok)' : 'rgba(255,255,255,0.06)',
+                background: activeNote === n ? 'var(--status-ok)' : 'var(--bg-hover)',
                 color: activeNote === n ? '#000' : 'var(--text-40)',
                 fontSize: 'var(--fs-2xs)', fontWeight: 900, textTransform: 'uppercase', transition: 'all 0.08s',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
@@ -111,11 +111,11 @@ function YtDownloader({ onLoaded, disabled }: {
       const params = new URLSearchParams({ url })
       if (start.trim()) params.set('start', start.trim())
       if (end.trim()) params.set('end', end.trim())
-      const res = await fetch(`${API}/api/yt-download?${params}`)
+      const res = await fetch(resolveUrl(`/api/yt-download?${params}`))
       const data = await res.json()
       if (data.error) { setState('err'); setErrMsg(data.error); return }
       const label = url.split('v=')[1]?.slice(0, 11) || 'yt-sample'
-      onLoaded(`${API}/api/preview?path=${encodeURIComponent(data.path)}`, label)
+      onLoaded(resolveUrl(`/api/preview?path=${encodeURIComponent(data.path)}`), label)
       setState('idle')
     } catch (e) {
       setState('err'); setErrMsg(String(e))
@@ -297,12 +297,12 @@ function LayerContextMenu({ menu, layers, onClose, onMute, onSolo, onRemove, onD
     <div onMouseDown={e => e.stopPropagation()}
       style={{
         position: 'fixed', left: menu.x, top: menu.y, zIndex: 9999,
-        background: 'var(--bg-chassis)', border: '1px solid rgba(255,255,255,0.12)',
+        background: 'var(--bg-chassis)', border: '1px solid var(--border-light)',
         borderRadius: 8, overflow: 'hidden', boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
         minWidth: 140,
       }}>
       <div style={{
-        padding: '5px 10px 4px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+        padding: '5px 10px 4px', borderBottom: '1px solid var(--border-subtle)',
         fontSize: 'var(--fs-xs)', fontWeight: 900, color: layer.color, letterSpacing: '0.1em',
       }}>
         {layer.label}
@@ -374,7 +374,7 @@ function LayerCard({ layer, focused, seqStep, seqPlaying, analyser, onFocus, onU
       style={{
         borderRadius: 12, padding: '10px 12px',
         background: focused ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)',
-        border: `1px solid ${focused ? layer.color + '55' : 'rgba(255,255,255,0.06)'}`,
+        border: `1px solid ${focused ? layer.color + '55' : 'var(--bg-hover)'}`,
         display: 'flex', flexDirection: 'column', gap: 10, transition: 'border-color 0.15s',
         cursor: focused ? 'default' : 'pointer',
         boxShadow: focused ? `inset 0 0 0 1px ${layer.color}22` : 'none',
@@ -421,18 +421,20 @@ function LayerCard({ layer, focused, seqStep, seqPlaying, analyser, onFocus, onU
         )}
 
         <button onClick={e => { e.stopPropagation(); onUpdate({ muted: !layer.muted }) }}
-          title={layer.muted ? 'Unmute [M in context menu]' : 'Mute'}
+          title={layer.muted ? "Unmute [M in context menu]" : "Mute"}
+          aria-label={layer.muted ? "Unmute" : "Mute"}
           style={{
             ...smBtn,
-            background: layer.muted ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.05)',
+            background: layer.muted ? 'rgba(239,68,68,0.3)' : 'var(--bg-hover)',
             color: layer.muted ? '#ef4444' : 'var(--text-20)',
           }}>M</button>
 
         <button onClick={e => { e.stopPropagation(); onToggleDrone() }} disabled={!hasPlayer}
-          title={isPlaying ? 'Stop [▶ toggle]' : 'Play drone'}
+          title={isPlaying ? "Stop [▶ toggle]" : "Play drone"}
+          aria-label={isPlaying ? "Stop" : "Play"}
           style={{
             ...smBtn,
-            background: isPlaying ? layer.color : 'rgba(255,255,255,0.07)',
+            background: isPlaying ? layer.color : 'var(--border-subtle)',
             color: isPlaying ? '#000' : 'var(--text-40)',
             opacity: hasPlayer ? 1 : 0.35,
           }}>
@@ -440,10 +442,11 @@ function LayerCard({ layer, focused, seqStep, seqPlaying, analyser, onFocus, onU
         </button>
 
         <button onClick={e => { e.stopPropagation(); onUpdate({ expanded: !layer.expanded }) }}
+          aria-label={layer.expanded ? "Collapse" : "Expand"}
           style={smBtn}>{layer.expanded ? '▲' : '▼'}</button>
 
         <button onClick={e => { e.stopPropagation(); onRemove() }}
-          title="Remove layer [right-click for more options]"
+          title="Remove layer [right-click for more options]" aria-label="Remove layer"
           style={{ ...smBtn, color: 'rgba(239,68,68,0.5)' }}>×</button>
       </div>
 
@@ -464,10 +467,10 @@ function LayerCard({ layer, focused, seqStep, seqPlaying, analyser, onFocus, onU
             <button onClick={handleUrlLoad} disabled={!layer.urlInput.trim() || layer.status === 'loading'}
               style={{ ...smBtn, width: 28 }}>↵</button>
             <button onClick={() => fileRef.current?.click()} disabled={layer.status === 'loading'}
-              style={{ ...smBtn, width: 28 }} title="Browse">📁</button>
+              style={{ ...smBtn, width: 28 }} title="Browse" aria-label="Browse files">📁</button>
             <button onClick={e => { e.stopPropagation(); setShowYt(v => !v) }}
               style={{ ...smBtn, width: 28, color: showYt ? '#ef4444' : 'rgba(255,80,80,0.55)' }}
-              title="YouTube download">YT</button>
+              title="YouTube download" aria-label="YouTube download">YT</button>
             <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff"
               style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) onLoadFile(f); e.target.value = '' }} />
@@ -534,7 +537,7 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
 
   async function doExport() {
     const active = layers.filter(l => !l.muted && l.loadedUrl)
-    if (active.length === 0) { setProgress('No loaded layers'); return }
+    if (active.length === 0) { setProgress('Nenhuma camada carregada'); return }
     setExporting(true)
     setProgress('Rendering…')
     try {
@@ -577,10 +580,10 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
       const a = document.createElement('a')
       a.href = url; a.download = `drone-${Date.now()}.wav`; a.click()
       URL.revokeObjectURL(url)
-      setProgress(`Done — ${duration}s WAV`)
+      setProgress(`Pronto — ${duration}s WAV`)
     } catch (e) {
       console.error('Export error', e)
-      setProgress('Export failed')
+      setProgress('Falha na exportação')
     }
     setExporting(false)
   }
@@ -590,7 +593,7 @@ function ExportSection({ layers, bpm, seqSteps: _seqSteps }: {
     : `${duration}s`
 
   return (
-    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 900, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-20)' }}>Export WAV</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-20)', fontFamily: 'monospace', flexShrink: 0, minWidth: 32 }}>{durationLabel}</span>
@@ -883,9 +886,10 @@ export function DronePanel({ onClose }: { onClose: () => void }) {
               <BpmControl bpm={bpm} onChange={setBpm} min={2} max={300} />
               <button onClick={seqPlaying ? stopSeq : startSeq}
                 title="Space to toggle"
+                aria-label={seqPlaying ? "Stop sequencer" : "Play sequencer"}
                 style={{
                   ...smBtn, padding: '3px 10px', width: 'auto',
-                  background: seqPlaying ? '#3b82f6' : 'rgba(255,255,255,0.07)',
+                  background: seqPlaying ? '#3b82f6' : 'var(--border-subtle)',
                   color: seqPlaying ? '#fff' : 'var(--text-40)',
                   boxShadow: seqPlaying ? '0 0 8px #3b82f688' : 'none',
                 }}>
@@ -894,10 +898,10 @@ export function DronePanel({ onClose }: { onClose: () => void }) {
               {layers.length < 6 && (
                 <button onClick={addLayer}
                   style={{ ...smBtn, padding: '3px 8px', width: 'auto', color: 'var(--status-ok)' }}
-                  title="Add layer">+ Layer</button>
+                  title="Add layer" aria-label="Add layer">+ Layer</button>
               )}
               <button onClick={() => setShowShortcuts(v => !v)}
-                title="Keyboard shortcuts"
+                title="Keyboard shortcuts" aria-label="Keyboard shortcuts"
                 style={{ ...smBtn, opacity: showShortcuts ? 1 : 0.4, fontSize: 'var(--fs-xs)' }}>?</button>
             </div>
           </PanelHeader>
@@ -956,7 +960,7 @@ export function DronePanel({ onClose }: { onClose: () => void }) {
 
 const smBtn: React.CSSProperties = {
   width: 26, height: 22, padding: 0, border: 'none', borderRadius: 5, cursor: 'pointer',
-  background: 'rgba(255,255,255,0.06)', color: 'var(--text-40)',
+  background: 'var(--bg-hover)', color: 'var(--text-40)',
   fontSize: 'var(--fs-base)', fontWeight: 800, flexShrink: 0, transition: 'all 0.1s',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 }

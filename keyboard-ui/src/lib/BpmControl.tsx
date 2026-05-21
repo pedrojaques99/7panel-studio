@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 
 const smBtn: React.CSSProperties = {
   height: 22, padding: '0 6px', border: 'none', borderRadius: 5, cursor: 'pointer',
-  background: 'rgba(255,255,255,0.06)', color: 'var(--text-40)',
+  background: 'var(--bg-hover)', color: 'var(--text-40)',
   fontSize: 'var(--fs-2xs)', fontWeight: 800, flexShrink: 0, transition: 'all 0.1s',
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
@@ -82,7 +82,7 @@ export function BpmControl({ bpm, onChange, min = 40, max = 300, accent = 'var(-
         style={{
           width: 36, padding: '2px 4px', borderRadius: 5,
           border: focused ? `1px solid ${accent}` : '1px solid rgba(255,255,255,0.08)',
-          background: focused ? 'var(--bg-input)' : 'rgba(255,255,255,0.05)',
+          background: focused ? 'var(--bg-input)' : 'var(--bg-hover)',
           color: 'var(--text-40)', fontFamily: 'monospace', fontWeight: 700,
           fontSize: 'var(--fs-xs)', textAlign: 'center',
           cursor: focused ? 'text' : 'ew-resize', outline: 'none',

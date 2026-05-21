@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import json
 import os
+import threading
+from datetime import datetime
 import comtypes
 
 app = Flask(__name__)
@@ -184,7 +186,26 @@ def upload_file():
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
     filename = file.filename
-    target_path = os.path.join(ASSETS_DIR, filename)
+    # Smart routing by filename prefix
+    prefix_map = [
+        ('synth-rec-', 'synth'),
+        ('drone-',     'drone'),
+        ('ps_',        'ps_'),
+        ('session',    'session_'),
+        ('drum-',      'drum'),
+    ]
+    subfolder = ''
+    for prefix, folder in prefix_map:
+        if filename.startswith(prefix):
+            subfolder = folder
+            break
+    date_prefix = datetime.now().strftime('%Y-%m-%d')
+    if subfolder:
+        dest_dir = os.path.join(ASSETS_DIR, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+        target_path = os.path.join(dest_dir, f"{date_prefix}_{filename}")
+    else:
+        target_path = os.path.join(ASSETS_DIR, filename)
     file.save(target_path)
     abs_path = os.path.abspath(target_path)
     return jsonify({"status": "success", "path": abs_path})
@@ -443,52 +464,104 @@ def stretch_audio():
         except: pass
 
 
-@app.route('/api/yt-download', methods=['GET'])
+_ytdl_jobs = {}
+
+def _run_ytdl(job_id, cmd, out_path, assets_dir, file_prefix):
+    import subprocess, re as _re
+    job = _ytdl_jobs[job_id]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            low = line.lower()
+            if 'post-process' in low or 'extracting audio' in low or 'converting' in low or 'merging' in low:
+                job['phase'] = 'processing'
+            m = _re.search(r'(\d+(?:\.\d+)?)%', line)
+            if m and job['phase'] == 'downloading':
+                job['progress'] = float(m.group(1))
+        proc.wait()
+        if proc.returncode != 0:
+            job['status'] = 'error'
+            job['error'] = 'yt-dlp exited with error'
+            return
+        final = out_path
+        if not os.path.exists(final):
+            candidates = [f for f in os.listdir(assets_dir) if f.startswith(file_prefix)]
+            if candidates:
+                final = os.path.join(assets_dir, sorted(candidates)[-1])
+            else:
+                job['status'] = 'error'
+                job['error'] = 'download produced no file'
+                return
+        job['path'] = final
+        job['progress'] = 100
+        job['phase'] = 'done'
+        job['status'] = 'done'
+    except FileNotFoundError:
+        job['status'] = 'error'
+        job['error'] = 'yt-dlp not found — pip install yt-dlp'
+    except Exception as e:
+        job['status'] = 'error'
+        job['error'] = str(e)
+
+
+@app.route('/api/yt-download', methods=['GET', 'POST'])
 def yt_download():
-    import subprocess, os, re, time
-    url   = request.args.get('url', '').strip()
-    start = request.args.get('start', '').strip()
-    end   = request.args.get('end', '').strip()
+    import re, time
+    data  = request.json or {} if request.method == 'POST' else {}
+    url      = (data.get('url') or request.args.get('url', '')).strip()
+    start    = (data.get('start') or request.args.get('start', '')).strip()
+    end      = (data.get('end') or request.args.get('end', '')).strip()
+    fmt      = (data.get('format') or request.args.get('format', 'mp3')).strip().lower()
+    filename = (data.get('filename') or request.args.get('filename', '')).strip()
+    if fmt not in ('mp3', 'mp4'):
+        return jsonify({'error': 'format must be mp3 or mp4'}), 400
     if not url:
         return jsonify({'error': 'missing url'}), 400
 
     assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
     os.makedirs(assets_dir, exist_ok=True)
 
-    slug = re.sub(r'[^a-zA-Z0-9]', '_', url)[-40:]
-    trim_tag = f'_{start.replace(":","")}-{end.replace(":","")}'.rstrip('-') if (start or end) else ''
-    out_path = os.path.join(assets_dir, f'yt_{slug}{trim_tag}.mp3')
+    if filename:
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', filename)
+        if not safe_name.lower().endswith(f'.{fmt}'):
+            safe_name += f'.{fmt}'
+        out_path = os.path.join(assets_dir, safe_name)
+    else:
+        slug = re.sub(r'[^a-zA-Z0-9]', '_', url)[-40:]
+        trim_tag = f'_{start.replace(":","")}-{end.replace(":","")}'.rstrip('-') if (start or end) else ''
+        out_path = os.path.join(assets_dir, f'yt_{slug}{trim_tag}.{fmt}')
 
     if os.path.exists(out_path):
-        return jsonify({'path': out_path})
+        return jsonify({'path': out_path, 'status': 'done', 'progress': 100})
 
-    cmd = ['yt-dlp', '-x', '--audio-format', 'mp3', '--audio-quality', '0',
-           '-o', out_path, '--no-playlist']
+    if fmt == 'mp3':
+        cmd = ['yt-dlp', '-x', '--audio-format', 'mp3', '--audio-quality', '0',
+               '--newline', '-o', out_path, '--no-playlist']
+    else:
+        cmd = ['yt-dlp', '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+               '--merge-output-format', 'mp4',
+               '--newline', '-o', out_path, '--no-playlist']
 
     if start or end:
         section = f'*{start or "0"}-{end or "inf"}'
-        cmd += ['--download-sections', section,
-                '--force-keyframes-at-cuts']
+        cmd += ['--download-sections', section, '--force-keyframes-at-cuts']
 
     cmd.append(url)
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        # yt-dlp may add extension suffix — find the actual file
-        if not os.path.exists(out_path):
-            candidates = [f for f in os.listdir(assets_dir)
-                          if f.startswith(f'yt_{slug}{trim_tag}')]
-            if candidates:
-                out_path = os.path.join(assets_dir, sorted(candidates)[-1])
-            else:
-                return jsonify({'error': result.stderr[-300:] or 'download failed'}), 500
-        return jsonify({'path': out_path})
-    except FileNotFoundError:
-        return jsonify({'error': 'yt-dlp not found — pip install yt-dlp'}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'download timed out (>120s)'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    file_prefix = os.path.splitext(os.path.basename(out_path))[0]
+    job_id = f'ytdl_{int(time.time()*1000)}'
+    _ytdl_jobs[job_id] = {'status': 'downloading', 'progress': 0, 'phase': 'downloading', 'path': '', 'error': ''}
+    t = threading.Thread(target=_run_ytdl, args=(job_id, cmd, out_path, assets_dir, file_prefix), daemon=True)
+    t.start()
+    return jsonify({'job_id': job_id})
+
+
+@app.route('/api/yt-download/status/<job_id>')
+def yt_download_status(job_id):
+    job = _ytdl_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'unknown job'}), 404
+    return jsonify(job)
 
 
 # ── Open in Explorer ────────────────────────────────────────────────────────
@@ -511,12 +584,144 @@ def list_assets():
     assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
     if not os.path.isdir(assets_dir):
         return jsonify([])
+    AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.webm', '.m4a', '.mp4', '.flac'}
+    folder_filter = request.args.get('folder', '').strip()
     files = []
-    for f in sorted(os.listdir(assets_dir)):
-        full = os.path.join(assets_dir, f)
-        if os.path.isfile(full):
-            files.append({'name': f, 'path': os.path.abspath(full)})
+    for root, _dirs, filenames in os.walk(assets_dir):
+        rel = os.path.relpath(root, assets_dir)
+        folder = '' if rel == '.' else rel.replace('\\', '/')
+        for f in sorted(filenames):
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in AUDIO_EXTS:
+                continue
+            if folder_filter and folder != folder_filter and not f.lower().startswith(folder_filter.lower()):
+                continue
+            full = os.path.join(root, f)
+            stat = os.stat(full)
+            files.append({
+                'name': f,
+                'path': os.path.abspath(full),
+                'folder': folder or folder_filter if f.lower().startswith(folder_filter.lower()) else folder,
+                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                'size': stat.st_size,
+            })
     return jsonify(files)
+
+
+# ── Waveform peaks (server-side, cached) ────────────────────────────────────
+
+_peaks_cache: dict = {}  # abs_path → [float]
+
+@app.route('/api/audio/peaks', methods=['GET'])
+def audio_peaks():
+    import subprocess as _sp, struct as _struct
+    path = request.args.get('path', '').strip()
+    buckets = min(int(request.args.get('buckets', '80')), 200)
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'not found'}), 404
+
+    cache_key = f"{path}:{buckets}"
+    if cache_key in _peaks_cache:
+        return jsonify(_peaks_cache[cache_key])
+
+    try:
+        cmd = [
+            'ffmpeg', '-i', path,
+            '-ac', '1', '-ar', '8000', '-f', 's16le',
+            '-acodec', 'pcm_s16le', '-v', 'quiet', '-'
+        ]
+        proc = _sp.run(cmd, capture_output=True, timeout=15)
+        if proc.returncode != 0:
+            return jsonify({'error': 'decode failed'}), 500
+
+        raw = proc.stdout
+        samples = _struct.unpack(f'<{len(raw)//2}h', raw)
+        total = len(samples)
+        step = max(1, total // buckets)
+        peaks = []
+        for i in range(buckets):
+            start = i * step
+            chunk = samples[start:start + step]
+            if chunk:
+                peaks.append(max(abs(s) for s in chunk) / 32768.0)
+            else:
+                peaks.append(0.0)
+        mx = max(peaks) if peaks else 1.0
+        if mx > 0:
+            peaks = [round(v / mx, 3) for v in peaks]
+
+        _peaks_cache[cache_key] = peaks
+        return jsonify(peaks)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── Audio normalize (loudnorm) ───────────────────────────────────────────────
+
+_norm_jobs: dict = {}  # job_id → { status, progress, path, error }
+
+@app.route('/api/audio/normalize', methods=['POST'])
+def audio_normalize():
+    import subprocess as _sp
+    data = request.json or {}
+    path = data.get('path', '').strip()
+    target_lufs = data.get('target_lufs', -16)
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'file not found'}), 400
+    try:
+        target_lufs = float(target_lufs)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'invalid target_lufs'}), 400
+
+    base, ext = os.path.splitext(path)
+    out_path = f"{base}_balanced{ext}"
+    job_id = str(_uuid.uuid4())
+    _norm_jobs[job_id] = {'status': 'running', 'progress': 0, 'path': None, 'error': None}
+
+    def _run():
+        try:
+            # Pass 1: measure loudness
+            cmd1 = [
+                'ffmpeg', '-y', '-i', path,
+                '-af', f'loudnorm=I={target_lufs}:print_format=json',
+                '-f', 'null', '-'
+            ]
+            r1 = _sp.run(cmd1, capture_output=True, text=True)
+            # Parse measured values from stderr
+            import json as _json
+            stderr = r1.stderr
+            json_start = stderr.rfind('{')
+            json_end = stderr.rfind('}')
+            if json_start == -1 or json_end == -1:
+                raise RuntimeError('loudnorm pass 1 failed: no JSON output')
+            measured = _json.loads(stderr[json_start:json_end + 1])
+            _norm_jobs[job_id]['progress'] = 50
+            # Pass 2: apply normalization
+            af = (
+                f"loudnorm=I={target_lufs}"
+                f":measured_I={measured['input_i']}"
+                f":measured_LRA={measured['input_lra']}"
+                f":measured_TP={measured['input_tp']}"
+                f":measured_thresh={measured['input_thresh']}"
+                f":linear=true:print_format=summary"
+            )
+            cmd2 = ['ffmpeg', '-y', '-i', path, '-af', af, out_path]
+            r2 = _sp.run(cmd2, capture_output=True, text=True)
+            if r2.returncode != 0:
+                raise RuntimeError(r2.stderr[-500:])
+            _norm_jobs[job_id].update({'status': 'done', 'progress': 100, 'path': os.path.abspath(out_path)})
+        except Exception as e:
+            _norm_jobs[job_id].update({'status': 'error', 'error': str(e)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'job_id': job_id, 'status': 'running'})
+
+@app.route('/api/audio/normalize/status/<job_id>', methods=['GET'])
+def audio_normalize_status(job_id):
+    job = _norm_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'unknown job'}), 404
+    return jsonify(job)
 
 
 # ── WAV → MP3 converter ──────────────────────────────────────────────────────
@@ -1098,50 +1303,6 @@ def shield_stream():
             'X-Accel-Buffering': 'no',
         }
     )
-
-
-TV_MEDIA_FILE = os.path.join(os.path.dirname(__file__), "tv_media.json")
-
-def _load_tv_media():
-    if os.path.exists(TV_MEDIA_FILE):
-        with open(TV_MEDIA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return []
-
-def _save_tv_media(items):
-    with open(TV_MEDIA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(items, f, indent=2, ensure_ascii=False)
-
-@app.route('/api/tv/media', methods=['GET'])
-def tv_media_list():
-    return jsonify(_load_tv_media())
-
-@app.route('/api/tv/media', methods=['POST'])
-def tv_media_save():
-    item = request.json
-    if not item or not item.get('url'):
-        return jsonify({"error": "url required"}), 400
-    items = _load_tv_media()
-    if any(i['url'] == item['url'] for i in items):
-        return jsonify({"status": "exists"})
-    items.append({
-        "url": item['url'],
-        "type": item.get('type', 'youtube'),
-        "title": item.get('title', ''),
-        "savedAt": item.get('savedAt', ''),
-    })
-    _save_tv_media(items)
-    return jsonify({"status": "saved"})
-
-@app.route('/api/tv/media', methods=['DELETE'])
-def tv_media_delete():
-    url = request.json.get('url') if request.json else None
-    if not url:
-        return jsonify({"error": "url required"}), 400
-    items = _load_tv_media()
-    items = [i for i in items if i['url'] != url]
-    _save_tv_media(items)
-    return jsonify({"status": "deleted"})
 
 
 if __name__ == '__main__':

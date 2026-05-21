@@ -79,14 +79,14 @@ function saveBriefing(d: BriefingData) {
 }
 
 const ghostBtnStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+  background: 'var(--bg-hover)', border: '1px solid rgba(255,255,255,0.08)',
   borderRadius: 8, color: 'rgba(255,255,255,0.4)', fontSize: 'var(--fs-md)',
   padding: '6px 14px', cursor: 'pointer', width: '100%',
 }
 
 const panelStyle: React.CSSProperties = {
   background: 'var(--bg-chassis)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 'var(--radius-panel)',
   boxShadow: 'var(--shadow-chassis)',
   display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -149,7 +149,7 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={() => update({ visible: !d.visible })}
             title={d.visible ? 'Ocultar do overlay' : 'Mostrar no overlay'}
-            style={{ background: d.visible ? '#00b86022' : 'rgba(255,255,255,0.06)', border: `1px solid ${d.visible ? '#00b86055' : 'rgba(255,255,255,0.1)'}`, borderRadius: 'var(--radius-xs)', padding: '3px 10px', cursor: 'pointer', fontSize: 'var(--fs-md)', color: d.visible ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: 600 }}>
+            style={{ background: d.visible ? '#00b86022' : 'var(--bg-hover)', border: `1px solid ${d.visible ? '#00b86055' : 'var(--border-light)'}`, borderRadius: 'var(--radius-xs)', padding: '3px 10px', cursor: 'pointer', fontSize: 'var(--fs-md)', color: d.visible ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: 600 }}>
             {d.visible ? 'Ao vivo' : 'Oculto'}
           </button>
         </PanelHeader>
@@ -192,7 +192,7 @@ export function BriefingPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
                   {PHASES.map((p, i) => (
-                    <button key={p} onClick={() => update({ phase: p })} title={p} style={{ flex: 1, height: 6, borderRadius: 4, cursor: 'pointer', border: 'none', background: i <= phaseIdx ? '#00b860' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s' }} />
+                    <button key={p} onClick={() => update({ phase: p })} title={p} style={{ flex: 1, height: 6, borderRadius: 4, cursor: 'pointer', border: 'none', background: i <= phaseIdx ? '#00b860' : 'var(--border-light)', transition: 'background 0.2s' }} />
                   ))}
                 </div>
               </div>
@@ -272,7 +272,7 @@ function ToggleField({ label, value, show, onToggle, onChange, placeholder }: { 
 
 function EyeToggle({ show, onToggle }: { show: boolean; onToggle: () => void }) {
   return (
-    <button onClick={onToggle} title={show ? 'Visível no overlay' : 'Oculto no overlay'} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-md)', opacity: show ? 1 : 0.35, padding: 0, color: show ? '#00b860' : 'rgba(255,255,255,0.6)', fontWeight: 600, letterSpacing: '0.04em' }}>
+    <button onClick={onToggle} title={show ? 'Visível no overlay' : 'Oculto no overlay'} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'var(--fs-md)', opacity: show ? 1 : 0.35, padding: 0, color: show ? '#00b860' : 'var(--text-60)', fontWeight: 600, letterSpacing: '0.04em' }}>
       {show ? '●' : '○'}
     </button>
   )
@@ -300,7 +300,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
       <div style={labelStyle}>{label}</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input type="color" value={value.startsWith('#') && value.length >= 7 ? value.slice(0, 7) : '#ffffff'} onChange={e => onChange(e.target.value)}
-          style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', background: 'none', cursor: 'pointer', padding: 2 }} />
+          style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid var(--border-light)', background: 'none', cursor: 'pointer', padding: 2 }} />
         <input type="text" value={value} onChange={e => onChange(e.target.value)}
           style={{ ...inputStyle, flex: 1, fontFamily: 'monospace', fontSize: 'var(--fs-lg)' }} placeholder="#ffffff" />
       </div>

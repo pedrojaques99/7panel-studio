@@ -82,10 +82,10 @@ export function Overlay() {
         position: 'absolute', top: 32, right: 48,
         background: 'rgba(14,15,17,0.6)',
         backdropFilter: 'blur(16px)',
-        border: '1px solid rgba(255,255,255,0.06)',
+        border: '1px solid var(--border-subtle)',
         borderRadius: 10, padding: '6px 14px',
       }}>
-        <span style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.5)', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-50)', fontVariantNumeric: 'tabular-nums' }}>
           {timer}
         </span>
       </div>
@@ -96,14 +96,14 @@ export function Overlay() {
           position: 'absolute', bottom: 48, left: 48, width: 280,
           background: 'rgba(14,15,17,0.72)',
           backdropFilter: 'blur(24px)',
-          border: '1px solid rgba(255,255,255,0.06)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: 14, padding: '14px 16px',
           animation: 'fadeIn 0.4s ease',
         }}>
           <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, letterSpacing: '0.16em', color: 'rgba(255,255,255,0.22)', textTransform: 'uppercase', marginBottom: 8 }}>Em andamento</div>
           <div style={{ display: 'flex', gap: 3, marginBottom: 10 }}>
             {PHASES.map((_, i) => (
-              <div key={i} style={{ flex: 1, height: 2, borderRadius: 4, background: i <= phaseIdx ? '#00b860' : 'rgba(255,255,255,0.07)' }} />
+              <div key={i} style={{ flex: 1, height: 2, borderRadius: 4, background: i <= phaseIdx ? '#00b860' : 'var(--border-subtle)' }} />
             ))}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -119,7 +119,7 @@ export function Overlay() {
             {briefing.showKeywords && briefing.keywords && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
                 {briefing.keywords.split(',').map(k => k.trim()).filter(Boolean).map(k => (
-                  <span key={k} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: '1px 6px', fontSize: 'var(--fs-sm)', color: 'rgba(255,255,255,0.35)' }}>{k}</span>
+                  <span key={k} style={{ background: 'var(--bg-hover)', borderRadius: 4, padding: '1px 6px', fontSize: 'var(--fs-sm)', color: 'rgba(255,255,255,0.35)' }}>{k}</span>
                 ))}
               </div>
             )}

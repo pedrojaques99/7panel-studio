@@ -11,7 +11,7 @@ interface Props {
 }
 
 const PANEL_DOTS: { key: keyof PanelVisibility; label: string; color: string }[] = [
-  { key: 'keys',       label: '⌨',  color: 'rgba(255,255,255,0.5)' },
+  { key: 'keys',       label: '⌨',  color: 'var(--text-50)' },
   { key: 'mixer',      label: '🎚', color: '#7c9ef5' },
   { key: 'soundboard', label: '🎹', color: '#a78bfa' },
   { key: 'obs',        label: '🎬', color: '#f87171' },
@@ -96,7 +96,7 @@ export function PresetBar({ visibility, scale, onLoad }: Props) {
         title="Save current layout as preset"
         style={{
           width: 36, height: 20, borderRadius: 6, border: '1px dashed rgba(255,255,255,0.12)',
-          background: 'transparent', color: 'rgba(255,255,255,0.25)', cursor: 'pointer',
+          background: 'transparent', color: 'var(--text-25)', cursor: 'pointer',
           fontSize: 'var(--fs-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'all 0.15s',
         }}
@@ -121,7 +121,7 @@ export function PresetBar({ visibility, scale, onLoad }: Props) {
               <CtxItem onClick={() => { onLoad(menu.preset!); setMenu(null) }}>▶ Load preset</CtxItem>
               <CtxItem onClick={() => handleSave(menu.preset)}>↺ Overwrite with current</CtxItem>
               <CtxItem onClick={() => { setEditId(menu.preset!.id); setEditName(menu.preset!.name); setMenu(null) }}>✎ Rename</CtxItem>
-              <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '2px 0' }} />
+              <div style={{ height: 1, background: 'var(--bg-hover)', margin: '2px 0' }} />
               <CtxItem danger onClick={() => handleDelete(menu.preset!.id)}>✕ Delete</CtxItem>
             </>
           )}
@@ -173,7 +173,7 @@ function PresetSlot({ preset, editId, editName, onEditName, onCommitRename, onLo
           style={{
             width: '100%', padding: '4px 2px', borderRadius: 7,
             border: '1px solid rgba(255,255,255,0.08)',
-            background: 'rgba(255,255,255,0.04)', cursor: 'pointer',
+            background: 'var(--bg-hover)', cursor: 'pointer',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
             transition: 'all 0.15s',
           }}
@@ -190,7 +190,7 @@ function PresetSlot({ preset, editId, editName, onEditName, onCommitRename, onLo
               />
             ))}
             {activePanels.length === 0 && (
-              <div style={{ width: 5, height: 5, borderRadius: 2, background: 'rgba(255,255,255,0.1)' }} />
+              <div style={{ width: 5, height: 5, borderRadius: 2, background: 'var(--border-light)' }} />
             )}
           </div>
           <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'rgba(255,255,255,0.4)', maxWidth: 40, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>
@@ -211,7 +211,7 @@ function CtxItem({ onClick, danger, children }: { onClick: () => void; danger?: 
         background: 'transparent', color: danger ? 'rgba(239,68,68,0.8)' : 'rgba(255,255,255,0.7)',
         fontSize: 'var(--fs-md)', fontWeight: 700, transition: 'all 0.1s',
       }}
-      onMouseEnter={e => { e.currentTarget.style.background = danger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)' }}
+      onMouseEnter={e => { e.currentTarget.style.background = danger ? 'rgba(239,68,68,0.12)' : 'var(--bg-hover)' }}
       onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
     >
       {children}

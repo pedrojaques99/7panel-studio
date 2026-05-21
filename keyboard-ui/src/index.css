@@ -27,6 +27,18 @@
   --text-70: rgba(255,255,255,0.7);
   --text-40: rgba(255,255,255,0.4);
   --text-20: rgba(255,255,255,0.2);
+  --text-60: rgba(255,255,255,0.6);
+  --text-50: rgba(255,255,255,0.5);
+  --text-25: rgba(255,255,255,0.25);
+  --text-10: rgba(255,255,255,0.1);
+  --text-05: rgba(255,255,255,0.05);
+  --border-subtle: rgba(255,255,255,0.07);
+  --border-light: rgba(255,255,255,0.1);
+  --bg-hover: rgba(255,255,255,0.05);
+  --bg-active: rgba(255,255,255,0.08);
+  --bg-overlay: rgba(0,0,0,0.5);
+  --bg-overlay-heavy: rgba(0,0,0,0.85);
+  --shadow-deep: 0 12px 40px rgba(0,0,0,0.85);
 
   /* Typography — size scale (base = 10px, compact UI) */
   --fs-3xs:  6px;   /* micro labels, extreme density     */
@@ -106,6 +118,10 @@ html.overlay {
 }
 
 /* CRT power-off animation (contained inside .retrotv-screen) */
+@keyframes ytdl-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
 @keyframes crt-off {
   0%   { transform: scale(1, 1); opacity: 1; filter: brightness(1); }
   40%  { transform: scale(1, 0.005); opacity: 1; filter: brightness(3); }

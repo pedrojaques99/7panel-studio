@@ -160,11 +160,11 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
         {/* Source checklist */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 900, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--text-20)' }}>
-            Capture Sources
+            Fontes de Captura
           </span>
           {sources.length === 0 ? (
             <span style={{ fontSize: 'var(--fs-base)', color: 'var(--text-20)', fontFamily: 'monospace' }}>
-              No panels open
+              Nenhum painel aberto
             </span>
           ) : (
             sources.map(src => {
@@ -175,7 +175,7 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
                   display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
                   padding: '7px 10px', borderRadius: 8,
                   background: isOn ? 'rgba(0,184,96,0.08)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${isOn ? 'rgba(0,184,96,0.25)' : 'rgba(255,255,255,0.06)'}`,
+                  border: `1px solid ${isOn ? 'rgba(0,184,96,0.25)' : 'var(--bg-hover)'}`,
                   transition: 'all 0.12s',
                 }}>
                   <input
@@ -217,7 +217,7 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
               disabled={!canRecord}
               style={{
                 ...smBtn, flex: 1, padding: '10px 0', fontSize: 'var(--fs-md)',
-                background: canRecord ? '#ef4444' : 'rgba(255,255,255,0.06)',
+                background: canRecord ? '#ef4444' : 'var(--bg-hover)',
                 color: canRecord ? '#fff' : 'var(--text-20)',
               }}
             >
@@ -242,7 +242,7 @@ export function ExporterPanel({ onClose }: { onClose: () => void }) {
           </span>
         )}
 
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'rgba(255,255,255,0.1)', fontFamily: 'monospace', lineHeight: 1.4 }}>
+        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-10)', fontFamily: 'monospace', lineHeight: 1.4 }}>
           Records only selected panels — not system audio
         </span>
       </div>

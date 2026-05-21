@@ -4,6 +4,7 @@ export type VisMode =
   | 'bars' | 'led' | 'radial' | 'line' | 'mirror'
   | 'particles'
   | 'scope' | 'smoke' | 'rings' | 'grid' | 'letters'
+  | 'flow'
   | 'plasma' | 'voronoi' | 'warp' | 'fractal' | 'neon'
 
 export type EngineType = 'audiomotion' | 'custom' | 'shader'
@@ -26,6 +27,7 @@ export const VIS_MODES: VisModeEntry[] = [
   { id: 'rings',     label: 'Rings',     engine: 'custom' },
   { id: 'grid',      label: 'Grid',      engine: 'custom' },
   // { id: 'letters',   label: 'Letters',   engine: 'custom' },
+  { id: 'flow',      label: 'DVD',       engine: 'custom' },
   { id: 'plasma',    label: 'Plasma',    engine: 'shader' },
   { id: 'voronoi',   label: 'Voronoi',   engine: 'shader' },
   { id: 'warp',      label: 'Warp',      engine: 'shader' },
@@ -75,6 +77,9 @@ export const KNOB_REGISTRY: Partial<Record<VisMode, KnobDef[]>> = {
     { key: 'rows',       label: 'ROWS',  min: 4,  max: 32,  step: 1, default: 14 },
     { key: 'scanSpeed',  label: 'SCAN',  min: 20, max: 200, default: 80 },
     { key: 'glowThresh', label: 'GLOW',  min: 0.1, max: 0.9, default: 0.5 },
+  ],
+  flow: [
+    { key: 'speed', label: 'SPEED', min: 0.5, max: 6, default: 2 },
   ],
   letters: [
     { key: 'spawnBase',  label: 'SPAWN', min: 1,   max: 8,   step: 1, default: 1 },

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { Rnd } from 'react-rnd'
-import { API } from '../lib/api'
+import { API, resolveUrl } from '../lib/api'
 import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
@@ -87,7 +87,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
     const timer = setTimeout(async () => {
       setDurationLoading(true)
       try {
-        const r = await fetch(`${API}/api/duration?path=${encodeURIComponent(serverPath)}`)
+        const r = await fetch(resolveUrl(`/api/duration?path=${encodeURIComponent(serverPath)}`))
         const d = await r.json()
         setInputDuration(d.duration ?? null)
       } catch { setInputDuration(null) }
@@ -122,13 +122,13 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
       })
       if (trimStart.trim()) params.set('trim_start', trimStart.trim())
       if (trimEnd.trim()) params.set('trim_end', trimEnd.trim())
-      const res = await fetch(`${API}/api/stretch?${params}`)
+      const res = await fetch(resolveUrl(`/api/stretch?${params}`))
       const data = await res.json()
       if (data.error) { updateJob(job.id, { status: 'err', errMsg: data.error }); return }
       updateJob(job.id, {
         status: 'done',
         resultPath: data.path,
-        resultUrl: `${API}/api/preview?path=${encodeURIComponent(data.path)}`,
+        resultUrl: resolveUrl(`/api/preview?path=${encodeURIComponent(data.path)}`),
       })
     } catch (e) {
       updateJob(job.id, { status: 'err', errMsg: String(e) })
@@ -142,7 +142,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
+      const res = await fetch(resolveUrl('/api/upload'), { method: 'POST', body: fd })
       const data = await res.json()
       if (data.status === 'success') {
         setUrlInput(data.path)
@@ -166,7 +166,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
       const params = new URLSearchParams({ url })
       if (ytStart.trim()) params.set('start', ytStart.trim())
       if (ytEnd.trim()) params.set('end', ytEnd.trim())
-      const res = await fetch(`${API}/api/yt-download?${params}`)
+      const res = await fetch(resolveUrl(`/api/yt-download?${params}`))
       const data = await res.json()
       if (data.error) { alert(data.error); setYtState('idle'); return }
       setYtState('idle')
@@ -414,7 +414,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
                 padding: `7px 10px ${playingId === job.id && playPos.duration > 0 ? '22px' : '7px'}`,
                 borderRadius: 8, position: 'relative',
                 background: job.status === 'done' ? 'rgba(139,92,246,0.07)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${job.status === 'done' ? 'rgba(139,92,246,0.25)' : job.status === 'err' ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)'}`,
+                border: `1px solid ${job.status === 'done' ? 'rgba(139,92,246,0.25)' : job.status === 'err' ? 'rgba(239,68,68,0.2)' : 'var(--bg-hover)'}`,
                 transition: 'padding 0.15s',
               }}>
                 {/* Status dot */}
@@ -446,7 +446,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
                       <span style={{ fontSize: 'var(--fs-xs)', fontFamily: 'monospace', color: 'var(--text-20)' }}>{fmtTime(playPos.current)}</span>
                       <span style={{ fontSize: 'var(--fs-xs)', fontFamily: 'monospace', color: 'var(--text-20)' }}>{fmtTime(playPos.duration)}</span>
                     </div>
-                    <div style={{ height: 2, background: 'rgba(255,255,255,0.08)', borderRadius: 99, overflow: 'hidden', cursor: 'pointer' }}
+                    <div style={{ height: 2, background: 'var(--bg-active)', borderRadius: 99, overflow: 'hidden', cursor: 'pointer' }}
                       onClick={e => {
                         if (!audioRef.current) return
                         const r = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
@@ -463,7 +463,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
                     <button onClick={() => togglePlay(job)}
                       title={playingId === job.id ? 'Parar' : 'Tocar'}
                       style={{ ...miniBtn, width: 28, padding: 0,
-                        background: playingId === job.id ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.07)',
+                        background: playingId === job.id ? 'rgba(139,92,246,0.5)' : 'var(--border-subtle)',
                         color: playingId === job.id ? '#fff' : 'var(--text-40)', fontSize: 'var(--fs-md)' }}>
                       {playingId === job.id ? '⏸' : '▶'}
                     </button>
@@ -509,6 +509,6 @@ const actionBtn: React.CSSProperties = {
 }
 const miniBtn: React.CSSProperties = {
   padding: '3px 8px', border: 'none', borderRadius: 5, cursor: 'pointer',
-  background: 'rgba(255,255,255,0.07)', color: 'var(--text-40)',
+  background: 'var(--border-subtle)', color: 'var(--text-40)',
   fontSize: 'var(--fs-sm)', fontWeight: 800,
 }

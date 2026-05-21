@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { loadGeo, saveGeo } from '../lib/geo'
-import { API } from '../lib/api'
+import { API, resolveUrl } from '../lib/api'
 import { usePanelCtx } from '../lib/panel-context'
 import { PanelHeader } from '../lib/PanelHeader'
 
@@ -9,7 +9,7 @@ type Status = 'idle' | 'uploading' | 'converting' | 'ok' | 'err'
 
 const inp: React.CSSProperties = {
   background: 'var(--bg-input)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 'var(--radius-sm)',
   color: 'var(--text-pure)',
   fontSize: 'var(--fs-lg)',
@@ -56,7 +56,7 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
     const fd = new FormData()
     fd.append('file', file)
     try {
-      const r   = await fetch(`${API}/api/upload`, { method: 'POST', body: fd })
+      const r   = await fetch(resolveUrl('/api/upload'), { method: 'POST', body: fd })
       const res = await r.json()
       if (res.status === 'success') {
         setInputPath(res.path)
@@ -76,18 +76,18 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
     startTimeRef.current = Date.now()
 
     try {
-      const r   = await fetch(`${API}/api/convert/wav-to-mp3`, {
+      const r   = await fetch(resolveUrl('/api/convert/wav-to-mp3'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: inputPath, bitrate, output: outputPath || undefined }),
       })
       const res = await r.json()
-      if (!r.ok || res.error) { setStatus('err'); setErrorMsg(res.error || 'Error'); return }
+      if (!r.ok || res.error) { setStatus('err'); setErrorMsg(res.error || 'Erro'); return }
 
       const jobId = res.job_id
       pollRef.current = setInterval(async () => {
         try {
-          const sr  = await fetch(`${API}/api/convert/status/${jobId}`)
+          const sr  = await fetch(resolveUrl(`/api/convert/status/${jobId}`))
           const job = await sr.json()
           setProgress(job.progress ?? 0)
           if (job.status === 'done') {
@@ -99,7 +99,7 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
           } else if (job.status === 'error') {
             stopPoll()
             setStatus('err')
-            setErrorMsg(job.error || 'Conversion failed')
+            setErrorMsg(job.error || 'Falha na conversão')
           }
         } catch { /* noop */ }
       }, 400)
@@ -137,7 +137,7 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
       style={{ zIndex: zOf('converter', 100) }}
       enableResizing={false}
     >
-      <div style={{ background: 'var(--bg-chassis)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 'var(--radius-panel)', boxShadow: 'var(--shadow-chassis)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-chassis)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-panel)', boxShadow: 'var(--shadow-chassis)', overflow: 'hidden' }}>
         <PanelHeader title="Converter" onClose={onClose} className="drag-handle" />
 
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -148,21 +148,21 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f) }}
             style={{
-              border: `2px dashed ${inputPath ? 'rgba(0,184,96,0.3)' : 'rgba(255,255,255,0.1)'}`,
+              border: `2px dashed ${inputPath ? 'rgba(0,184,96,0.3)' : 'var(--border-light)'}`,
               borderRadius: 10, padding: '16px 12px', textAlign: 'center', cursor: 'pointer',
               background: inputPath ? 'rgba(0,184,96,0.04)' : 'transparent',
               transition: 'all 0.15s',
             }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = inputPath ? 'rgba(0,184,96,0.5)' : 'rgba(255,255,255,0.25)')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = inputPath ? 'rgba(0,184,96,0.3)' : 'rgba(255,255,255,0.1)')}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = inputPath ? 'rgba(0,184,96,0.5)' : 'var(--text-25)')}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = inputPath ? 'rgba(0,184,96,0.3)' : 'var(--border-light)')}
           >
             <div style={{ fontSize: 'var(--fs-5xl)', marginBottom: 4 }}>{status === 'uploading' ? '⏳' : inputPath ? '✓' : '📂'}</div>
             <div style={{ fontSize: 'var(--fs-md)', color: inputPath ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: 600 }}>
               {status === 'uploading'
-                ? 'Uploading...'
+                ? 'Enviando...'
                 : inputPath
                   ? inputPath.split(/[\\/]/).pop()
-                  : 'Click or drop audio file here'}
+                  : 'Clique ou solte o áudio aqui'}
             </div>
             <input ref={uploadRef} type="file" accept=".wav,.mp3,.ogg,.flac,.m4a" style={{ display: 'none' }}
               onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = '' }} />
@@ -190,7 +190,7 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
                 <button key={b} onClick={() => setBitrate(b)} style={{
                   flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
                   fontSize: 'var(--fs-md)', fontWeight: bitrate === b ? 700 : 400,
-                  border: `1px solid ${bitrate === b ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.07)'}`,
+                  border: `1px solid ${bitrate === b ? 'rgba(255,255,255,0.25)' : 'var(--border-subtle)'}`,
                   background: bitrate === b ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)',
                   color: bitrate === b ? 'var(--text-pure)' : 'rgba(255,255,255,0.35)',
                   transition: 'all 0.12s',
@@ -203,13 +203,13 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
           {status === 'converting' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.4)', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Converting</span>
+                <span style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.4)', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Convertendo</span>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                   <span style={{ fontSize: 'var(--fs-md)', color: 'rgba(255,255,255,0.35)', fontVariantNumeric: 'tabular-nums' }}>⏱ {fmtTime(elapsed)}</span>
                   <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: '#00b860', fontVariantNumeric: 'tabular-nums' }}>{progress}%</span>
                 </div>
               </div>
-              <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+              <div style={{ height: 6, borderRadius: 4, background: 'var(--border-subtle)', overflow: 'hidden' }}>
                 <div style={{
                   height: '100%', borderRadius: 4,
                   background: 'linear-gradient(90deg, #00b860, #00d470)',
@@ -234,9 +234,9 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
             }}
           >
             {status === 'converting' ? `// ${progress}% — ${fmtTime(elapsed)}`
-              : status === 'ok'       ? '✓ Done — Convert Another'
-              : status === 'err'      ? '✕ Failed — Retry'
-              : '⇄ Convert to MP3'}
+              : status === 'ok'       ? '✓ Pronto — Converter Outro'
+              : status === 'err'      ? '✕ Falhou — Tentar Novamente'
+              : '⇄ Converter para MP3'}
           </button>
 
           {/* Error */}
@@ -249,11 +249,11 @@ export function ConverterPanel({ onClose }: { onClose: () => void }) {
           {/* Result */}
           {status === 'ok' && resultPath && (
             <div style={{ background: 'rgba(0,184,96,0.07)', border: '1px solid rgba(0,184,96,0.2)', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 'var(--fs-base)', color: '#00b860', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Saved</div>
-              <div style={{ fontSize: 'var(--fs-md)', color: 'rgba(255,255,255,0.5)', wordBreak: 'break-all' }}>{resultPath}</div>
+              <div style={{ fontSize: 'var(--fs-base)', color: '#00b860', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Salvo</div>
+              <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-50)', wordBreak: 'break-all' }}>{resultPath}</div>
               <button
                 onClick={() => fetch(`${API}/api/open-explorer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: resultPath }) })}
-                style={{ alignSelf: 'flex-start', padding: '5px 12px', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', fontSize: 'var(--fs-md)', fontWeight: 600, cursor: 'pointer' }}
+                style={{ alignSelf: 'flex-start', padding: '5px 12px', border: '1px solid var(--border-light)', borderRadius: 7, background: 'var(--bg-hover)', color: 'var(--text-60)', fontSize: 'var(--fs-md)', fontWeight: 600, cursor: 'pointer' }}
               >📂 Abrir no Explorer</button>
             </div>
           )}

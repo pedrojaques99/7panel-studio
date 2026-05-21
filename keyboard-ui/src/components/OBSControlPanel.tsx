@@ -16,7 +16,7 @@ const STATUS_COLOR: Record<Status, string> = {
 
 const panelStyle: React.CSSProperties = {
   background: 'var(--bg-chassis)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 'var(--radius-panel)',
   boxShadow: 'var(--shadow-chassis)',
   display: 'flex',
@@ -163,7 +163,7 @@ export function OBSControlPanel({ onClose }: { onClose: () => void }) {
                   value={f.value}
                   onChange={e => f.set(e.target.value)}
                   placeholder={f.ph}
-                  style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 'var(--radius-sm)', color: 'var(--text-pure)', fontSize: 'var(--fs-lg)', padding: '6px 10px', outline: 'none', boxShadow: 'var(--shadow-input)' }}
+                  style={{ width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-sm)', color: 'var(--text-pure)', fontSize: 'var(--fs-lg)', padding: '6px 10px', outline: 'none', boxShadow: 'var(--shadow-input)' }}
                 />
               </div>
             ))}
@@ -220,7 +220,7 @@ function ObsBtn({ label, sublabel, disabled, active, activeColor, pulse, onClick
         background: active
           ? `linear-gradient(135deg, ${activeColor}22, ${activeColor}11)`
           : 'rgba(255,255,255,0.04)',
-        border: `1px solid ${active ? activeColor + '55' : 'rgba(255,255,255,0.08)'}`,
+        border: `1px solid ${active ? activeColor + '55' : 'var(--bg-active)'}`,
         borderRadius: 12, padding: '12px 14px',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.4 : 1,

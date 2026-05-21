@@ -12,7 +12,7 @@ export type AutoMsg = { text: string; prefix: string; intervalMins: number; enab
 
 const panelStyle: React.CSSProperties = {
   background: 'var(--bg-chassis)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  border: '1px solid var(--border-subtle)',
   borderRadius: 'var(--radius-panel)',
   boxShadow: 'var(--shadow-chassis)',
   display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -150,7 +150,7 @@ setModAlerts(data.filter((a: any) => !a.dismissed))
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
                   <button onClick={() => deleteAlert(a.id)} style={{ background: '#ef444422', border: '1px solid #ef444444', borderRadius: 6, color: '#ef4444', fontWeight: 700, fontSize: 'var(--fs-base)', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>Deletar</button>
-                  <button onClick={() => dismissAlert(a.id)} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.3)', fontSize: 'var(--fs-base)', padding: '3px 8px', cursor: 'pointer' }}>Ignorar</button>
+                  <button onClick={() => dismissAlert(a.id)} style={{ background: 'var(--bg-hover)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.3)', fontSize: 'var(--fs-base)', padding: '3px 8px', cursor: 'pointer' }}>Ignorar</button>
                 </div>
               </div>
             ))}
@@ -171,7 +171,7 @@ setModAlerts(data.filter((a: any) => !a.dismissed))
                   <button onClick={saveVideoId} style={{ background: 'var(--status-ok)', border: 'none', borderRadius: 'var(--radius-sm)', color: '#000', fontWeight: 700, fontSize: 'var(--fs-lg)', padding: '0 12px', cursor: 'pointer' }}>OK</button>
                 </div>
               ) : (
-                <button onClick={() => { setTempId(videoId); setEditingId(true) }} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: videoId ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)', fontSize: 'var(--fs-lg)', padding: '6px 12px', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+                <button onClick={() => { setTempId(videoId); setEditingId(true) }} style={{ background: 'var(--bg-hover)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: videoId ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)', fontSize: 'var(--fs-lg)', padding: '6px 12px', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
                   {videoId ? videoId : '+ Colar ID ou URL da live'}
                 </button>
               )}
@@ -193,7 +193,7 @@ setModAlerts(data.filter((a: any) => !a.dismissed))
             <ManualPinForm onPin={pinMessage} pinDuration={pinDuration} onChangeDuration={d => { setPinDuration(d); localStorage.setItem('yt-pin-duration', String(d)) }} />
 
             {/* Chat iframe */}
-            <div style={{ flex: 1, margin: '10px 16px 16px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'var(--bg-input)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ flex: 1, margin: '10px 16px 16px', borderRadius: 'var(--radius-sm)', overflow: 'hidden', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)' }}>
               {chatUrl ? (
                 <iframe src={chatUrl} style={{ width: '100%', height: '100%', border: 'none', display: 'block' }} title="YouTube Live Chat" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" />
               ) : (
@@ -261,7 +261,7 @@ function CommandsTab() {
     saveAutoMsgs([...autoMsgs, { text: newAutoText.trim(), prefix: newAutoPrefix.trim(), intervalMins: newAutoMins, enabled: true }])
   }
 
-  const sectionLabel: React.CSSProperties = { fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.25)', textTransform: 'uppercase', marginBottom: 2 }
+  const sectionLabel: React.CSSProperties = { fontSize: 'var(--fs-base)', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-25)', textTransform: 'uppercase', marginBottom: 2 }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -276,7 +276,7 @@ function CommandsTab() {
       <div style={sectionLabel}>Comandos do chat</div>
 
       {commands.map((cmd, i) => (
-        <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: '#00b860', fontFamily: 'monospace' }}>{cmd.trigger}</span>
             <button onClick={() => saveCommands(commands.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-2xl)' }}>×</button>
@@ -295,20 +295,20 @@ function CommandsTab() {
       </div>
 
       {/* ── Auto-mensagens ── */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+      <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
         <div style={sectionLabel}>Mensagens automáticas</div>
       </div>
 
       {autoMsgs.map((am, i) => (
-        <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${am.enabled ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div key={i} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${am.enabled ? 'rgba(245,158,11,0.2)' : 'var(--bg-hover)'}`, borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               onClick={() => saveAutoMsgs(autoMsgs.map((m, j) => j === i ? { ...m, enabled: !m.enabled } : m))}
-              style={{ flexShrink: 0, width: 28, height: 16, borderRadius: 8, border: 'none', cursor: 'pointer', background: am.enabled ? '#f59e0b' : 'rgba(255,255,255,0.1)', position: 'relative', transition: 'background 0.2s' }}
+              style={{ flexShrink: 0, width: 28, height: 16, borderRadius: 8, border: 'none', cursor: 'pointer', background: am.enabled ? '#f59e0b' : 'var(--border-light)', position: 'relative', transition: 'background 0.2s' }}
             >
               <span style={{ position: 'absolute', top: 2, left: am.enabled ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
             </button>
-            <span style={{ fontSize: 'var(--fs-base)', color: am.enabled ? '#f59e0b' : 'rgba(255,255,255,0.25)', fontWeight: 700 }}>a cada {am.intervalMins} min</span>
+            <span style={{ fontSize: 'var(--fs-base)', color: am.enabled ? '#f59e0b' : 'var(--text-25)', fontWeight: 700 }}>a cada {am.intervalMins} min</span>
             <button onClick={() => saveAutoMsgs(autoMsgs.filter((_, j) => j !== i))} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.2)', fontSize: 'var(--fs-2xl)' }}>×</button>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -329,7 +329,7 @@ function CommandsTab() {
             />
           </div>
           {(am.prefix || am.text) && (
-            <div style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.25)', fontStyle: 'italic', paddingLeft: 2 }}>
+            <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-25)', fontStyle: 'italic', paddingLeft: 2 }}>
               Preview: {[am.prefix, am.text].filter(Boolean).join(' ')}
             </div>
           )}
@@ -347,7 +347,7 @@ function CommandsTab() {
           <textarea value={newAutoText} onChange={e => setNewAutoText(e.target.value)} placeholder={'Use !club para entrar na nossa comunidade'} rows={2} style={{ ...inputStyle, resize: 'none', lineHeight: 1.5, flex: 1 }} />
         </div>
         {(newAutoPrefix || newAutoText) && (
-          <div style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.25)', fontStyle: 'italic', paddingLeft: 2 }}>
+          <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-25)', fontStyle: 'italic', paddingLeft: 2 }}>
             Preview: {[newAutoPrefix, newAutoText].filter(Boolean).join(' ')}
           </div>
         )}
@@ -382,7 +382,7 @@ function ManualPinForm({ onPin, pinDuration, onChangeDuration }: {
 
   return (
     <div style={{ padding: '0 16px 10px', flexShrink: 0 }}>
-      <button onClick={() => setOpen(v => !v)} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'rgba(255,255,255,0.4)', fontSize: 'var(--fs-md)', padding: '5px 12px', cursor: 'pointer', width: '100%' }}>
+      <button onClick={() => setOpen(v => !v)} style={{ background: 'var(--bg-hover)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, color: 'rgba(255,255,255,0.4)', fontSize: 'var(--fs-md)', padding: '5px 12px', cursor: 'pointer', width: '100%' }}>
         {open ? 'Fechar' : 'Pin manual'}
       </button>
       {open && (
@@ -392,7 +392,7 @@ function ManualPinForm({ onPin, pinDuration, onChangeDuration }: {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span style={{ fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.3)', whiteSpace: 'nowrap' }}>Duração:</span>
             {[15, 30, 60].map(s => (
-              <button key={s} onClick={() => onChangeDuration(s)} style={{ flex: 1, background: pinDuration === s ? 'rgba(0,184,96,0.13)' : 'rgba(255,255,255,0.04)', border: `1px solid ${pinDuration === s ? 'rgba(0,184,96,0.33)' : 'rgba(255,255,255,0.08)'}`, borderRadius: 'var(--radius-xs)', color: pinDuration === s ? 'var(--status-ok)' : 'var(--text-40)', fontSize: 'var(--fs-md)', padding: '4px 0', cursor: 'pointer' }}>{s}s</button>
+              <button key={s} onClick={() => onChangeDuration(s)} style={{ flex: 1, background: pinDuration === s ? 'rgba(0,184,96,0.13)' : 'rgba(255,255,255,0.04)', border: `1px solid ${pinDuration === s ? 'rgba(0,184,96,0.33)' : 'var(--bg-active)'}`, borderRadius: 'var(--radius-xs)', color: pinDuration === s ? 'var(--status-ok)' : 'var(--text-40)', fontSize: 'var(--fs-md)', padding: '4px 0', cursor: 'pointer' }}>{s}s</button>
             ))}
             <button onClick={submit} style={{ flex: 2, background: 'var(--status-ok)', border: 'none', borderRadius: 'var(--radius-xs)', color: '#000', fontWeight: 700, fontSize: 'var(--fs-lg)', padding: '4px 0', cursor: 'pointer' }}>Pinar</button>
           </div>

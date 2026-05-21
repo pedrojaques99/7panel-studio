@@ -108,7 +108,7 @@ export function ShieldAlert() {
           </div>
           <button
             onClick={handleDismiss}
-            style={{ marginTop: 8, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10, color: '#fff', fontSize: 'var(--fs-xl)', fontWeight: 600, padding: '10px 28px', cursor: 'pointer' }}
+            style={{ marginTop: 8, background: 'var(--border-light)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10, color: '#fff', fontSize: 'var(--fs-xl)', fontWeight: 600, padding: '10px 28px', cursor: 'pointer' }}
           >
             Liberar tela
           </button>
@@ -140,7 +140,7 @@ export function ShieldAlert() {
                 <span style={{ marginLeft: 10, fontSize: 'var(--fs-md)', color: '#00b860', fontWeight: 600 }}>· OBS → {localStorage.getItem('obs-brb-scene') || 'Já Volto'}</span>
               )}
             </div>
-            <div style={{ fontSize: 'var(--fs-md)', color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>
+            <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-50)', marginTop: 1 }}>
               Feche o arquivo para liberar automaticamente
             </div>
           </div>
