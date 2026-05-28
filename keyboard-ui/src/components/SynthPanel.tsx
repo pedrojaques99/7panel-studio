@@ -12,6 +12,7 @@ import { WHITE_NOTES, NOTE_CENTS, KEY_NOTE, BLACK_KEYS } from '../lib/notes'
 import { BpmControl } from '../lib/BpmControl'
 import { globalClock } from '../lib/global-clock'
 import { SynthKnob } from '../lib/SynthKnob'
+import { ADSRDisplay } from '../lib/ADSRDisplay'
 import { EffectsRack } from '../lib/EffectsRack'
 import type { FxParams as BaseFxParams, FxChain } from '../lib/fx-rack'
 import {
@@ -20,6 +21,9 @@ import {
   driftFxParams, randomizeFxParams, resolveFxParams,
 } from '../lib/fx-rack'
 import { noteBus } from '../lib/note-bus'
+import { requestMIDIAccess, createMIDIListener, listMIDIInputs } from '../lib/midi'
+import { FilterEnvParams, FILTER_ENV_DEFAULTS, createFilterEnvelope, updateFilterEnvelope, triggerFilterEnvAttack, triggerFilterEnvRelease, disposeFilterEnvelope } from '../lib/filter-envelope'
+import { LFOParams, LFO_DEFAULTS, LFO_TARGETS, type LFOWave, createLFO, connectLFO, disconnectLFO, updateLFO, disposeLFO } from '../lib/lfo'
 
 type Note = typeof WHITE_NOTES[number]
 
@@ -43,6 +47,17 @@ const PAUL_MODE = { grainSize: 0.85, overlap: 0.45, playbackRate: 0.22 }
 const NORMAL_MODE = { grainSize: 0.25, overlap: 0.18, playbackRate: 1.0 }
 
 const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
+
+/** Transpose a note name by octaveShift (e.g. "C3" + 1 → "C4") and adjust cents accordingly */
+function transposeNote(noteName: string, shift: number): { name: string; cents: number } {
+  const match = noteName.match(/^([A-G]#?)(\d+)$/)
+  if (!match) return { name: noteName, cents: NOTE_CENTS[noteName as keyof typeof NOTE_CENTS] ?? 0 }
+  const letter = match[1]
+  const oct = parseInt(match[2]) + shift
+  const newName = `${letter}${oct}`
+  const baseCents = NOTE_CENTS[noteName as keyof typeof NOTE_CENTS] ?? 0
+  return { name: newName, cents: baseCents + shift * 1200 }
+}
 
 function setPlayerDetune(player: any, cents: number) {
   if (player.detune && typeof player.detune === 'object' && 'value' in player.detune) {
@@ -153,7 +168,7 @@ function parseTime(v: string): number {
 
 type Status = 'idle' | 'loading' | 'ready' | 'playing'
 
-type SeqStep = { noteName: string; cents: number }
+type SeqStep = { noteName: string; cents: number; velocity?: number }
 
 type TimedEvent = { noteName: string; cents: number; timeMs: number; durationMs: number }
 
@@ -168,14 +183,18 @@ const LOOP_COLORS = ['#a78bfa', '#34d399', '#f59e0b', '#ef4444', '#06b6d4', '#ec
 
 /* ── Big oscilloscope/spectrum (real-time) ────────────────────────── */
 
-function Scope({ analyser, color, height = 84 }: {
-  analyser: Tone.Analyser | null; color: string; height?: number
+function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onToggleMode, voiceCount = 0, cpuLatency = 0 }: {
+  analyser: Tone.Analyser | null; fftAnalyser: Tone.Analyser | null; color: string; height?: number
+  mode?: 'wave' | 'fft'; onToggleMode?: () => void
+  voiceCount?: number; cpuLatency?: number
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const raf = useRef<number>(0)
+  const modeRef = useRef(mode); modeRef.current = mode
 
   useEffect(() => {
-    if (!analyser) return
+    const activeAnalyser = modeRef.current === 'fft' ? fftAnalyser : analyser
+    if (!activeAnalyser && !analyser) return
     function draw() {
       raf.current = requestAnimationFrame(draw)
       const c = ref.current; if (!c) return
@@ -184,7 +203,6 @@ function Scope({ analyser, color, height = 84 }: {
       ctx.fillStyle = 'rgba(8,9,11,0.85)'
       ctx.fillRect(0, 0, w, h)
 
-      // grid
       ctx.strokeStyle = 'rgba(255,255,255,0.04)'
       ctx.lineWidth = 1
       for (let i = 0; i < 8; i++) {
@@ -193,31 +211,73 @@ function Scope({ analyser, color, height = 84 }: {
       }
       ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke()
 
-      // waveform
-      const data = analyser!.getValue() as Float32Array
-      ctx.strokeStyle = color
-      ctx.shadowColor = color
-      ctx.shadowBlur = 8
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] as number)
-        const x = (i / (data.length - 1)) * w
-        const y = h / 2 - v * (h / 2) * 0.9
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+      if (modeRef.current === 'fft' && fftAnalyser) {
+        const data = fftAnalyser.getValue() as Float32Array
+        const barCount = Math.min(data.length / 2, 128)
+        ctx.fillStyle = color
+        ctx.globalAlpha = 0.7
+        for (let i = 0; i < barCount; i++) {
+          const logI = Math.pow(i / barCount, 2) * (data.length / 2)
+          const idx = Math.min(Math.floor(logI), data.length - 1)
+          const db = data[idx] as number
+          const norm = Math.max(0, Math.min(1, (db + 100) / 100))
+          const bw = w / barCount
+          ctx.fillRect(i * bw, h - norm * h, bw - 1, norm * h)
+        }
+        ctx.globalAlpha = 1
+      } else if (analyser) {
+        const data = analyser.getValue() as Float32Array
+        ctx.strokeStyle = color
+        ctx.shadowColor = color
+        ctx.shadowBlur = 8
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] as number)
+          const x = (i / (data.length - 1)) * w
+          const y = h / 2 - v * (h / 2) * 0.9
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+        }
+        ctx.stroke()
+        ctx.shadowBlur = 0
       }
-      ctx.stroke()
-      ctx.shadowBlur = 0
     }
     draw()
     return () => cancelAnimationFrame(raf.current)
-  }, [analyser, color])
+  }, [analyser, fftAnalyser, color])
 
-  return <canvas ref={ref} width={420} height={height} style={{
-    width: '100%', height, display: 'block', borderRadius: 10,
-    background: 'linear-gradient(180deg,#0a0b0d,#06070a)',
-    boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04)',
-  }} />
+  const cpuColor = cpuLatency < 10 ? '#34d399' : cpuLatency < 20 ? '#f59e0b' : '#ef4444'
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <canvas ref={ref} width={420} height={height} style={{
+        width: '100%', height, display: 'block', borderRadius: 10,
+        background: 'linear-gradient(180deg,#0a0b0d,#06070a)',
+        boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04)',
+      }} />
+      {onToggleMode && (
+        <button onClick={onToggleMode} style={{
+          position: 'absolute', top: 4, left: 6, padding: '1px 6px',
+          fontSize: 9, fontFamily: 'monospace', fontWeight: 800,
+          background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.5)',
+          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, cursor: 'pointer',
+          letterSpacing: '0.1em',
+        }}>{mode === 'wave' ? 'WAVE' : 'FFT'}</button>
+      )}
+      <span style={{
+        position: 'absolute', top: 4, right: 6,
+        fontSize: 9, fontFamily: 'monospace', fontWeight: 800,
+        color: voiceCount > 0 ? color : 'rgba(255,255,255,0.25)',
+      }}>{voiceCount}/64</span>
+      <div title={`Audio latency: ${cpuLatency.toFixed(1)}ms`} style={{
+        position: 'absolute', bottom: 4, right: 6,
+        display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, fontFamily: 'monospace', color: cpuColor,
+      }}>
+        <div style={{ width: 5, height: 5, borderRadius: '50%', background: cpuColor }} />
+        {cpuLatency.toFixed(0)}ms
+      </div>
+    </div>
+  )
 }
 
 /* ── Piano keyboard (horizontal, white + black) ──────────────────── */
@@ -230,7 +290,7 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
   seqColor?: string
   onNoteOn: (noteName: string, cents: number) => void
   onNoteOff: (noteName: string) => void
-  onToggleSeq: (noteName: string, cents: number) => void
+  onToggleSeq: (noteName: string, cents: number, e?: React.MouseEvent) => void
 }) {
   const whitesArr = [...WHITE_NOTES]
   const reverseKey = (note: Note) =>
@@ -279,7 +339,7 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
     onPointerEnter: (e: React.PointerEvent) => handleEnter(noteName, cents, e),
     onPointerLeave: (e: React.PointerEvent) => handleLeave(noteName, e),
     onContextMenu: (e: React.MouseEvent) => {
-      e.preventDefault(); onToggleSeq(noteName, cents)
+      e.preventDefault(); onToggleSeq(noteName, cents, e)
     },
   })
 
@@ -327,6 +387,13 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
               <span style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: isActive ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.3)' }}>
                 {reverseKey(n)}
               </span>
+              {inSeq && (
+                <div style={{
+                  position: 'absolute', bottom: 0, left: '15%', right: '15%',
+                  height: Math.round((sequence[seqIdx].velocity ?? 0.8) * 12),
+                  background: seqColor, opacity: 0.5, borderRadius: '2px 2px 0 0',
+                }} />
+              )}
             </button>
           )
         })}
@@ -372,6 +439,13 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
                 </span>
               )}
               {bk.label}
+              {inSeq && (
+                <div style={{
+                  position: 'absolute', bottom: 0, left: '20%', right: '20%',
+                  height: Math.round((sequence[seqIdx].velocity ?? 0.8) * 10),
+                  background: seqColor, opacity: 0.6, borderRadius: '2px 2px 0 0',
+                }} />
+              )}
             </button>
           )
         })}
@@ -404,11 +478,17 @@ type FxParams = BaseFxParams & {
   paul: number        // grainSize seconds 0.05..1.5 (couples overlap)
   rate: number        // playbackRate 0.05..2
   velocity: number    // note velocity 0.1..1 (scales volume per trigger)
-}
+  envAttack: number   // envelope attack 0.001..2
+  envDecay: number    // envelope decay 0.01..2
+  envSustain: number  // envelope sustain 0..1
+  envRelease: number  // envelope release 0.01..5
+} & FilterEnvParams & LFOParams
 
 const FX_DEFAULTS: FxParams = {
   ...BASE_FX_DEFAULTS,
   paul: 0.5, rate: 0.5, velocity: 1,
+  envAttack: 0.05, envDecay: 0.3, envSustain: 0.6, envRelease: 1.2,
+  ...FILTER_ENV_DEFAULTS, ...LFO_DEFAULTS,
 }
 
 /* ── Presets ─────────────────────────────────────────────────────── */
@@ -419,6 +499,7 @@ type SynthPreset = {
   // Partial: missing fields are merged with FX_DEFAULTS at apply-time so old presets stay compatible
   fx: Partial<FxParams>
   paulMode: boolean
+  synthType?: 'fm' | 'am' | 'sine' | 'square' | 'sawtooth' | 'triangle'
   source?: { url: string; label: string } | null
   factory?: boolean
 }
@@ -477,6 +558,10 @@ type Engine = {
   chain: FxChain
   polySynth: Tone.PolySynth
   player: Tone.GrainPlayer | null
+  filterEnv: Tone.FrequencyEnvelope | null
+  lfo: Tone.LFO | null
+  lfoTarget: string
+  fftAnalyser: Tone.Analyser
 }
 
 /* ── YT downloader (mini) ─────────────────────────────────────────── */
@@ -538,12 +623,13 @@ function YtDownloader({ onLoaded, disabled }: {
 /* ── Preset menu (popup) ──────────────────────────────────────────── */
 
 function PresetMenu({
-  factory, user, current, anchorRef, onApply, onSave, onDelete, onClose,
+  factory, user, current, anchorRef, onApply, onSave, onDelete, onClose, onExport, onImport,
 }: {
   factory: SynthPreset[]; user: SynthPreset[]; current: SynthPreset | null
   anchorRef: React.RefObject<HTMLButtonElement | null>
   onApply: (p: SynthPreset) => void; onSave: (name: string) => void
   onDelete: (id: string) => void; onClose: () => void
+  onExport: () => void; onImport: () => void
 }) {
   const [name, setName] = useState('')
   const popRef = useRef<HTMLDivElement>(null)
@@ -605,6 +691,18 @@ function PresetMenu({
           </>
         )}
       </div>
+      <div style={{ display: 'flex', gap: 6, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
+        <button onClick={onExport}
+          style={{
+            ...miniBtn, flex: 1, padding: '5px 0', fontSize: 'var(--fs-xs)',
+            background: 'rgba(6,182,212,0.12)', color: 'rgba(6,182,212,0.8)',
+          }}>↓ Export</button>
+        <button onClick={onImport}
+          style={{
+            ...miniBtn, flex: 1, padding: '5px 0', fontSize: 'var(--fs-xs)',
+            background: 'rgba(167,139,250,0.12)', color: 'rgba(167,139,250,0.8)',
+          }}>↑ Import</button>
+      </div>
     </div>
   )
 }
@@ -653,6 +751,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const [paulMode, setPaulMode] = useState(false)
   const [analogMode, setAnalogMode] = useState(false)
   const analogModeRef = useRef(analogMode); analogModeRef.current = analogMode
+  const [octaveShift, setOctaveShift] = useState(0)
+  const octaveShiftRef = useRef(octaveShift); octaveShiftRef.current = octaveShift
+  const [synthType, setSynthType] = useState<'fm' | 'am' | 'sine' | 'square' | 'sawtooth' | 'triangle'>('fm')
   const [status, setStatus] = useState<Status>('idle')
   const [srcLabel, setSrcLabel] = useState('')
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
@@ -731,6 +832,56 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const [currentPresetId, setCurrentPresetId] = useState<string | null>('f-init')
   const presetBtnRef = useRef<HTMLButtonElement>(null)
 
+  // Undo/Redo for FX params
+  const [fxHistory, setFxHistory] = useState<FxParams[]>([FX_DEFAULTS])
+  const [fxHistoryIdx, setFxHistoryIdx] = useState(0)
+  const lastFxPushRef = useRef(0)
+
+  function pushFxHistory(params: FxParams) {
+    const now = Date.now()
+    if (now - lastFxPushRef.current < 500) return
+    lastFxPushRef.current = now
+    setFxHistory(prev => {
+      const trimmed = prev.slice(0, fxHistoryIdx + 1)
+      const next = [...trimmed, params]
+      if (next.length > 30) next.shift()
+      return next
+    })
+    setFxHistoryIdx(prev => Math.min(prev + 1, 29))
+  }
+
+  function undoFx() {
+    if (fxHistoryIdx <= 0) return
+    const newIdx = fxHistoryIdx - 1
+    setFxHistoryIdx(newIdx)
+    const restored = fxHistory[newIdx]
+    if (restored) {
+      setFx(restored)
+      const e = engineRef.current
+      if (e) {
+        updateFxChain(e.chain, restored)
+        e.polySynth.volume.rampTo(Tone.gainToDb(restored.vol * 0.55), 0.05)
+        if (e.player) applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, restored.rate * sampleSpeedRef.current, restored.paul)
+      }
+    }
+  }
+
+  function redoFx() {
+    if (fxHistoryIdx >= fxHistory.length - 1) return
+    const newIdx = fxHistoryIdx + 1
+    setFxHistoryIdx(newIdx)
+    const restored = fxHistory[newIdx]
+    if (restored) {
+      setFx(restored)
+      const e = engineRef.current
+      if (e) {
+        updateFxChain(e.chain, restored)
+        e.polySynth.volume.rampTo(Tone.gainToDb(restored.vol * 0.55), 0.05)
+        if (e.player) applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, restored.rate * sampleSpeedRef.current, restored.paul)
+      }
+    }
+  }
+
   // Sequencer — multi-loop
   const [loops, setLoops] = useState<SeqLoop[]>([{ steps: [], muted: false }])
   const [activeLoopIdx, setActiveLoopIdx] = useState(0)
@@ -738,6 +889,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const [seqSteps, setSeqSteps] = useState<number[]>([-1]) // per-loop step index for UI
   const [seqBpm, setSeqBpm] = useState(80)
   const [seqGate, setSeqGate] = useState(0.95)
+  const [seqSwing, setSeqSwing] = useState(0)
   const [harmonyInfo, setHarmonyInfo] = useState<ReturnType<typeof getHarmonyInfo>>(null)
   useEffect(() => {
     _synthBpmRegistry.set(instanceId, seqBpm)
@@ -751,6 +903,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   seqBpmRef.current = seqBpm
   const seqGateRef = useRef(seqGate)
   seqGateRef.current = seqGate
+  const seqSwingRef = useRef(seqSwing)
+  seqSwingRef.current = seqSwing
   const activeSequence = loops[activeLoopIdx]?.steps ?? []
   const totalSteps = loops.reduce((s, l) => s + (l.muted ? 0 : l.steps.length), 0)
   const hasAnyContent = loops.some(l => l.steps.length > 0 || (l.freestyle && l.freestyle.length > 0))
@@ -767,8 +921,18 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const statusRef = useRef(status); statusRef.current = status
   // Force re-render of Scope when engine becomes available (analyser ref change)
   const [, setEngineTick] = useState(0)
+  const [scopeMode, setScopeMode] = useState<'wave' | 'fft'>('wave')
+  const [cpuLatency, setCpuLatency] = useState(0)
 
   useEffect(() => { saveUserPresets(userPresets) }, [userPresets])
+
+  // CPU latency polling
+  useEffect(() => {
+    const id = setInterval(() => {
+      try { setCpuLatency((Tone.getContext().rawContext as AudioContext).baseLatency * 1000) } catch {}
+    }, 2000)
+    return () => clearInterval(id)
+  }, [])
 
   /* register capture */
   useEffect(() => {
@@ -778,6 +942,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       synthMonitorEnabled = true  // reset for next mount
     }
   }, [])
+
+  const attackedNotes = useRef(new Set<string>())
 
   /* cleanup on unmount */
   useEffect(() => () => { disposeEngine() }, [])
@@ -812,6 +978,54 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     })
   }, [noteBusLinked])
 
+  /* ── MIDI input ─────────────────────────────────────────────────── */
+  const [midiEnabled, setMidiEnabled] = useState(false)
+  const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null)
+  const [midiInputName, setMidiInputName] = useState('')
+  const midiListenerRef = useRef<ReturnType<typeof createMIDIListener> | null>(null)
+
+  useEffect(() => {
+    if (!midiEnabled) {
+      midiListenerRef.current?.stop()
+      midiListenerRef.current = null
+      setMidiInputName('')
+      return
+    }
+    let cancelled = false
+    let accessRef: MIDIAccess | null = null
+    ;(async () => {
+      const access = await requestMIDIAccess()
+      if (cancelled) return
+      if (!access) { setMidiEnabled(false); return }
+      setMidiAccess(access)
+      accessRef = access
+      const listener = createMIDIListener({
+        noteOn: (noteName, _velocity) => {
+          const wCents = NOTE_CENTS[noteName as Note]
+          if (wCents !== undefined) { noteOn(noteName, wCents) }
+          else { const bk = BLACK_KEYS.find(k => k.label === noteName); if (bk) noteOn(noteName, bk.cents) }
+        },
+        noteOff: (noteName) => { noteOff(noteName) },
+        cc: (controller, value) => {
+          if (controller === 1) { setFx(prev => ({ ...prev, cutoff: 200 + (value / 127) * 15800 })) }
+        },
+        pitchBend: (value) => {
+          const e = engineRef.current
+          if (e?.player) applyPitchAndSpeed(e.player, value * 200, analogModeRef.current, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
+        },
+      })
+      midiListenerRef.current = listener
+      function connectFirst(acc: MIDIAccess) {
+        const inputs = listMIDIInputs(acc)
+        if (inputs.length > 0) { listener.start(inputs[0]); setMidiInputName(inputs[0].name ?? 'MIDI Device') }
+        else { setMidiInputName('') }
+      }
+      connectFirst(access)
+      access.onstatechange = () => { if (!cancelled) connectFirst(access) }
+    })()
+    return () => { cancelled = true; midiListenerRef.current?.stop(); midiListenerRef.current = null; if (accessRef) accessRef.onstatechange = null }
+  }, [midiEnabled, noteOn, noteOff])
+
   function disposePlayer() {
     const e = engineRef.current; if (!e || !e.player) return
     try { e.player.stop() } catch{ /* noop */ }
@@ -824,6 +1038,10 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     disposePlayer()
     try { e.polySynth.releaseAll() } catch{ /* noop */ }
     try { e.polySynth.dispose() } catch{ /* noop */ }
+    if (e.filterEnv) { try { disposeFilterEnvelope(e.filterEnv) } catch{ /* noop */ } }
+    if (e.lfo) { try { disposeLFO(e.lfo) } catch{ /* noop */ } }
+    try { e.fftAnalyser.dispose() } catch{ /* noop */ }
+    attackedNotes.current.clear()
     disposeFxChain(e.chain)
     synthOutputGain = null
     engineRef.current = null
@@ -840,19 +1058,93 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     synthOutputGain = chain.outputGain
     if (!synthMonitorEnabled) chain.outputGain.gain.value = 0
 
-    // PolySynth (FM-ish warm pad) routed through FX chain input
-    const polySynth = new Tone.PolySynth(Tone.FMSynth, {
-      harmonicity: 2.5,
-      modulationIndex: 6,
-      envelope: { attack: 0.05, decay: 0.3, sustain: 0.6, release: 1.2 },
-      modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
-    })
+    // PolySynth routed through FX chain input — type depends on synthType state
+    const env = { attack: p.envAttack, decay: p.envDecay, sustain: p.envSustain, release: p.envRelease }
+    const st = synthType
+    let polySynth: Tone.PolySynth
+    if (st === 'fm') {
+      polySynth = new Tone.PolySynth(Tone.FMSynth, {
+        maxPolyphony: 64, harmonicity: 2.5, modulationIndex: 6,
+        envelope: env, modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
+      })
+    } else if (st === 'am') {
+      polySynth = new Tone.PolySynth(Tone.AMSynth, {
+        maxPolyphony: 64, harmonicity: 2.5,
+        envelope: env, modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
+      })
+    } else {
+      polySynth = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 64, oscillator: { type: st },
+        envelope: env,
+      })
+    }
     polySynth.volume.value = Tone.gainToDb(p.vol * 0.55)
+    // Patch: suppress InvalidAccessError thrown by recycled voices
+    for (const method of ['_triggerAttack', '_triggerRelease'] as const) {
+      const orig = (polySynth as any)[method].bind(polySynth)
+      ;(polySynth as any)[method] = (...args: any[]) => {
+        try { return orig(...args) } catch { /* voice already stopped */ }
+      }
+    }
     polySynth.connect(chain.input)
 
-    engineRef.current = { chain, polySynth, player: null }
+    // FFT analyser for spectrum view
+    const fftAnalyser = new Tone.Analyser('fft', 1024)
+    chain.reverb.connect(fftAnalyser)
+
+    // Filter envelope (only active when depth > 0)
+    let filterEnv: Tone.FrequencyEnvelope | null = null
+    if (p.fenvDepth > 0) {
+      filterEnv = createFilterEnvelope(chain.filter, p as FilterEnvParams, p.cutoff)
+    }
+
+    // LFO (only active when depth > 0)
+    let lfo: Tone.LFO | null = null
+    if (p.lfoDepth > 0) {
+      lfo = createLFO(p as LFOParams)
+      connectLFO(lfo, chain, p.lfoTarget)
+    }
+
+    engineRef.current = { chain, polySynth, player: null, filterEnv, lfo, lfoTarget: p.lfoTarget, fftAnalyser }
     setEngineTick(t => t + 1)
     return engineRef.current
+  }
+
+  /** Rebuild polySynth with a different synth type, preserving ADSR and FX chain */
+  function rebuildPolySynth(type: 'fm' | 'am' | 'sine' | 'square' | 'sawtooth' | 'triangle') {
+    const e = engineRef.current
+    if (!e) return
+    const p = fxRef.current
+    try { e.polySynth.releaseAll() } catch { /* noop */ }
+    try { e.polySynth.dispose() } catch { /* noop */ }
+    attackedNotes.current.clear()
+    const env = { attack: p.envAttack, decay: p.envDecay, sustain: p.envSustain, release: p.envRelease }
+    let polySynth: Tone.PolySynth
+    if (type === 'fm') {
+      polySynth = new Tone.PolySynth(Tone.FMSynth, {
+        maxPolyphony: 64, harmonicity: 2.5, modulationIndex: 6,
+        envelope: env, modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
+      })
+    } else if (type === 'am') {
+      polySynth = new Tone.PolySynth(Tone.AMSynth, {
+        maxPolyphony: 64, harmonicity: 2.5,
+        envelope: env, modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
+      })
+    } else {
+      polySynth = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 64, oscillator: { type },
+        envelope: env,
+      })
+    }
+    polySynth.volume.value = Tone.gainToDb(p.vol * 0.55)
+    for (const method of ['_triggerAttack', '_triggerRelease'] as const) {
+      const orig = (polySynth as any)[method].bind(polySynth)
+      ;(polySynth as any)[method] = (...args: any[]) => {
+        try { return orig(...args) } catch { /* voice already stopped */ }
+      }
+    }
+    polySynth.connect(e.chain.input)
+    e.polySynth = polySynth
   }
 
   async function loadFromUrl(url: string, label: string) {
@@ -917,6 +1209,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   function updateFx(patch: Partial<FxParams>) {
     setFx(prev => {
       const next = { ...prev, ...patch }
+      pushFxHistory(next)
       const e = engineRef.current
       if (e) {
         // Shared FX chain params
@@ -931,6 +1224,54 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
           if (patch.vol !== undefined) e.player.volume.rampTo(Tone.gainToDb(patch.vol * (patch.velocity ?? fxRef.current.velocity)), 0.05)
         }
         if (patch.vol !== undefined) e.polySynth.volume.rampTo(Tone.gainToDb(patch.vol * 0.55), 0.05)
+        // Apply ADSR envelope changes
+        if (patch.envAttack !== undefined || patch.envDecay !== undefined || patch.envSustain !== undefined || patch.envRelease !== undefined) {
+          e.polySynth.set({ envelope: {
+            attack: patch.envAttack ?? next.envAttack,
+            decay: patch.envDecay ?? next.envDecay,
+            sustain: patch.envSustain ?? next.envSustain,
+            release: patch.envRelease ?? next.envRelease,
+          }})
+        }
+        // Filter envelope
+        const fenvChanged = patch.fenvAttack !== undefined || patch.fenvDecay !== undefined ||
+          patch.fenvSustain !== undefined || patch.fenvRelease !== undefined || patch.fenvDepth !== undefined
+        if (fenvChanged) {
+          const baseCutoff = patch.cutoff ?? next.cutoff
+          if (next.fenvDepth > 0) {
+            if (!e.filterEnv) {
+              e.filterEnv = createFilterEnvelope(e.chain.filter, next as FilterEnvParams, baseCutoff)
+            } else {
+              updateFilterEnvelope(e.filterEnv, next as Partial<FilterEnvParams>, baseCutoff)
+            }
+          } else if (e.filterEnv) {
+            disposeFilterEnvelope(e.filterEnv); e.filterEnv = null
+          }
+        }
+        if (patch.cutoff !== undefined && e.filterEnv && next.fenvDepth > 0) {
+          e.filterEnv.baseFrequency = next.cutoff
+        }
+        // LFO
+        const lfoChanged = patch.lfoRate !== undefined || patch.lfoDepth !== undefined ||
+          patch.lfoWave !== undefined || patch.lfoTarget !== undefined
+        if (lfoChanged) {
+          if (next.lfoDepth > 0) {
+            if (!e.lfo) {
+              e.lfo = createLFO(next as LFOParams)
+              connectLFO(e.lfo, e.chain, next.lfoTarget)
+              e.lfoTarget = next.lfoTarget
+            } else {
+              updateLFO(e.lfo, next as Partial<LFOParams>)
+              if (patch.lfoTarget !== undefined && patch.lfoTarget !== e.lfoTarget) {
+                disconnectLFO(e.lfo)
+                connectLFO(e.lfo, e.chain, next.lfoTarget)
+                e.lfoTarget = next.lfoTarget
+              }
+            }
+          } else if (e.lfo) {
+            disposeLFO(e.lfo); e.lfo = null
+          }
+        }
       }
       return next
     })
@@ -945,12 +1286,13 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
 
   /* ── Sequencer (multi-loop) ── */
 
-  function toggleInSequence(noteName: string, cents: number) {
+  function toggleInSequence(noteName: string, cents: number, e?: React.MouseEvent) {
+    const velocity = e?.shiftKey ? 1.0 : 0.8
     setLoops(prev => prev.map((loop, i) => {
       if (i !== activeLoopIdx) return loop
       const idx = loop.steps.findIndex(s => s.noteName === noteName)
       if (idx >= 0) return { ...loop, steps: loop.steps.filter((_, j) => j !== idx) }
-      return { ...loop, steps: [...loop.steps, { noteName, cents }] }
+      return { ...loop, steps: [...loop.steps, { noteName, cents, velocity }] }
     }))
   }
 
@@ -1003,15 +1345,17 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     setSeqPlaying(false)
     const e = engineRef.current
     if (e) try { e.polySynth.releaseAll() } catch{ /* noop */ }
+    attackedNotes.current.clear()
     setActiveNotes(new Set())
   }
 
-  function playNote(noteName: string, cents: number, noteMs: number) {
+  function playNote(noteName: string, cents: number, noteMs: number, velocity?: number) {
     const e = engineRef.current; if (!e) return
+    const vel = velocity ?? fxRef.current.velocity
     if (e.player && statusRef.current === 'playing') {
       applyPitchAndSpeed(e.player, cents, analogModeRef.current, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
     } else {
-      try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000, undefined, fxRef.current.velocity) } catch{ /* noop */ }
+      try { e.polySynth.triggerAttackRelease(noteName, noteMs / 1000, undefined, vel) } catch{ /* noop */ }
     }
     setActiveNotes(prev => { const n = new Set(prev); n.add(noteName); return n })
     window.setTimeout(() => {
@@ -1026,9 +1370,18 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     const noteMs = Math.max(20, stepMs * Math.max(0.02, seqGateRef.current))
 
     // Epoch-aligned step: figure out which step we should be on based on shared t0
+    // Apply swing: offset even-indexed steps by swing amount
+    const swing = seqSwingRef.current
     const elapsed = performance.now() - globalClock.getEpoch()
     const globalStep = Math.floor(elapsed / stepMs)
     if (globalStep === lastStepRef.current) return
+    // For swing: delay even-numbered steps (0-indexed even = beat 1,3,5... which are the off-beats)
+    // Actually swing delays the "and" beats (odd steps in 0-indexed)
+    if (swing > 0 && globalStep % 2 === 1) {
+      const swingDelayMs = swing * stepMs * 0.5
+      const timeInStep = elapsed - globalStep * stepMs
+      if (timeInStep < swingDelayMs) return
+    }
     lastStepRef.current = globalStep
 
     const newSteps = [...seqStepIdxRefs.current]
@@ -1040,8 +1393,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       const idx = globalStep % loop.steps.length
       newSteps[i] = idx + 1
       uiSteps.push(idx)
-      const { noteName, cents } = loop.steps[idx]
-      playNote(noteName, cents, noteMs)
+      const step = loop.steps[idx]
+      playNote(step.noteName, step.cents, noteMs, step.velocity ?? 0.8)
     }
     seqStepIdxRefs.current = newSteps
     setSeqSteps(uiSteps)
@@ -1220,11 +1573,23 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     const rnd = (a: number, b: number) => a + Math.random() * (b - a)
     const rndLog = (a: number, b: number) => Math.exp(rnd(Math.log(a), Math.log(b)))
     const baseRnd = randomizeFxParams()
+    const useFenv = Math.random() < 0.4
+    const useLfo = Math.random() < 0.35
     const next: FxParams = {
       ...baseRnd,
       paul: rnd(0.1, 1.2),
       rate: rndLog(0.15, 1.5),
       velocity: rnd(0.5, 1),
+      envAttack: rndLog(0.005, 0.8),
+      envDecay: rndLog(0.05, 1.2),
+      envSustain: rnd(0.1, 0.9),
+      envRelease: rndLog(0.1, 3.5),
+      fenvAttack: rnd(0.01, 0.5), fenvDecay: rnd(0.05, 0.8),
+      fenvSustain: rnd(0.2, 0.8), fenvRelease: rnd(0.1, 2),
+      fenvDepth: useFenv ? rnd(0.1, 0.8) : 0,
+      lfoRate: rndLog(0.2, 10), lfoDepth: useLfo ? rnd(0.1, 0.7) : 0,
+      lfoWave: (['sine', 'triangle', 'sawtooth', 'square'] as const)[Math.floor(Math.random() * 4)],
+      lfoTarget: LFO_TARGETS[Math.floor(Math.random() * LFO_TARGETS.length)],
     }
     const nextPaulMode = Math.random() < 0.3
     setCurrentPresetId(null)
@@ -1234,9 +1599,22 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     if (e) {
       updateFxChain(e.chain, baseRnd, 0.1)
       e.polySynth.volume.rampTo(Tone.gainToDb(next.vol * 0.55), 0.1)
+      e.polySynth.set({ envelope: { attack: next.envAttack, decay: next.envDecay, sustain: next.envSustain, release: next.envRelease } })
       if (e.player) {
         applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, next.rate * sampleSpeedRef.current, next.paul)
         e.player.volume.rampTo(Tone.gainToDb(next.vol * next.velocity), 0.1)
+      }
+      // Filter envelope
+      if (next.fenvDepth > 0) {
+        if (!e.filterEnv) e.filterEnv = createFilterEnvelope(e.chain.filter, next as FilterEnvParams, next.cutoff)
+        else updateFilterEnvelope(e.filterEnv, next as Partial<FilterEnvParams>, next.cutoff)
+      } else if (e.filterEnv) { disposeFilterEnvelope(e.filterEnv); e.filterEnv = null }
+      // LFO
+      if (e.lfo) { disposeLFO(e.lfo); e.lfo = null }
+      if (next.lfoDepth > 0) {
+        e.lfo = createLFO(next as LFOParams)
+        connectLFO(e.lfo, e.chain, next.lfoTarget)
+        e.lfoTarget = next.lfoTarget
       }
     }
   }
@@ -1246,6 +1624,12 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   async function applyPreset(p: SynthPreset) {
     setCurrentPresetId(p.id)
     setPaulMode(p.paulMode)
+    // Apply synthType from preset (default to 'fm' for older presets)
+    const presetSynthType = p.synthType ?? 'fm'
+    if (presetSynthType !== synthType) {
+      setSynthType(presetSynthType)
+      rebuildPolySynth(presetSynthType)
+    }
     // Merge with defaults so older presets without new FX fields still work
     const fxFull: FxParams = { ...FX_DEFAULTS, ...p.fx }
     setFx(fxFull)
@@ -1253,6 +1637,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     if (e) {
       updateFxChain(e.chain, fxFull)
       e.polySynth.volume.rampTo(Tone.gainToDb(fxFull.vol * 0.55), 0.05)
+      e.polySynth.set({ envelope: { attack: fxFull.envAttack, decay: fxFull.envDecay, sustain: fxFull.envSustain, release: fxFull.envRelease } })
       if (e.player) {
         applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, fxFull.rate * sampleSpeedRef.current, fxFull.paul)
         e.player.volume.rampTo(Tone.gainToDb(fxFull.vol * fxFull.velocity), 0.05)
@@ -1276,6 +1661,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       name,
       fx: { ...fx },
       paulMode,
+      synthType,
       source,
     }
     setUserPresets(prev => [...prev, p])
@@ -1285,6 +1671,45 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   function deletePreset(id: string) {
     setUserPresets(prev => prev.filter(p => p.id !== id))
     if (currentPresetId === id) setCurrentPresetId(null)
+  }
+
+  function exportPreset() {
+    const data = {
+      name: currentPreset?.name ?? 'Untitled',
+      fx: { ...fx },
+      paulMode,
+      synthType,
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `synth-preset-${(data.name).replace(/\s+/g, '-').toLowerCase()}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  function importPreset() {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async () => {
+      const file = input.files?.[0]; if (!file) return
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        if (!data.fx || typeof data.fx !== 'object') { console.warn('Invalid preset: missing fx'); return }
+        const preset: SynthPreset = {
+          id: `u-imp-${Date.now()}`,
+          name: data.name || file.name.replace(/\.json$/, ''),
+          fx: { ...FX_DEFAULTS, ...data.fx },
+          paulMode: !!data.paulMode,
+          synthType: data.synthType ?? 'fm',
+        }
+        setUserPresets(prev => [...prev, preset])
+        applyPreset(preset)
+      } catch (err) { console.error('Import preset error', err) }
+    }
+    input.click()
   }
 
   const currentPreset = currentPresetId
@@ -1312,10 +1737,16 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       applyPitchAndSpeed(e.player, cents, analogModeRef.current, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
       return
     }
-    try { e.polySynth.triggerAttack(noteName, undefined, fxRef.current.velocity) } catch (err) { console.warn('synth attack err', err) }
+    try {
+      e.polySynth.triggerAttack(noteName, undefined, fxRef.current.velocity)
+      attackedNotes.current.add(noteName)
+      if (e.filterEnv && fxRef.current.fenvDepth > 0) triggerFilterEnvAttack(e.filterEnv)
+    } catch (err) { console.warn('synth attack err', err) }
     if (pendingRelease.current.has(noteName)) {
       pendingRelease.current.delete(noteName)
+      attackedNotes.current.delete(noteName)
       try { e.polySynth.triggerRelease(noteName) } catch { /* noop */ }
+      if (e.filterEnv && fxRef.current.fenvDepth > 0) triggerFilterEnvRelease(e.filterEnv)
     }
   }, [])
 
@@ -1325,30 +1756,52 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     const e = engineRef.current
     if (!e) { pendingRelease.current.add(noteName); return }
     if (e.player && statusRef.current === 'playing') return
+    if (!attackedNotes.current.has(noteName)) { pendingRelease.current.add(noteName); return }
+    attackedNotes.current.delete(noteName)
     try { e.polySynth.triggerRelease(noteName) } catch{ /* noop */ }
+    if (e.filterEnv && fxRef.current.fenvDepth > 0) triggerFilterEnvRelease(e.filterEnv)
   }, [])
 
-  /* Physical keyboard → noteOn/Off (sustain while held) */
+  /* Undo/Redo keyboard shortcut */
+  useEffect(() => {
+    function onKeyDown(ev: KeyboardEvent) {
+      if (ev.target instanceof HTMLInputElement) return
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'z' && !ev.shiftKey) { ev.preventDefault(); undoFx() }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'z' && ev.shiftKey) { ev.preventDefault(); redoFx() }
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Z') { ev.preventDefault(); redoFx() }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [fxHistoryIdx, fxHistory])
+
+  /* Physical keyboard → noteOn/Off (sustain while held) + octave shift [ ] */
   useEffect(() => {
     const pressed = new Set<string>()
+    const keyToTransposed = new Map<string, string>()
     function onDown(ev: KeyboardEvent) {
       if (ev.target instanceof HTMLInputElement) return
       const k = ev.key.toLowerCase()
-      if (pressed.has(k)) return // ignore OS auto-repeat
+      if (k === '[') { setOctaveShift(o => Math.max(-3, o - 1)); return }
+      if (k === ']') { setOctaveShift(o => Math.min(3, o + 1)); return }
+      if (pressed.has(k)) return
       const note = KEY_NOTE[k]
-      if (note) { pressed.add(k); noteOn(note, NOTE_CENTS[note]) }
+      if (note) {
+        pressed.add(k)
+        const t = transposeNote(note, octaveShiftRef.current)
+        keyToTransposed.set(k, t.name)
+        noteOn(t.name, t.cents)
+      }
     }
     function onUp(ev: KeyboardEvent) {
       const k = ev.key.toLowerCase()
       if (!pressed.has(k)) return
       pressed.delete(k)
-      const note = KEY_NOTE[k]
-      if (note) noteOff(note)
+      const tn = keyToTransposed.get(k)
+      if (tn) { keyToTransposed.delete(k); noteOff(tn) }
     }
     function onBlur() {
-      // release everything if window loses focus
-      pressed.forEach(k => { const n = KEY_NOTE[k]; if (n) noteOff(n) })
-      pressed.clear()
+      pressed.forEach(k => { const tn = keyToTransposed.get(k); if (tn) noteOff(tn) })
+      pressed.clear(); keyToTransposed.clear()
     }
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
@@ -1401,6 +1854,22 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 {currentPreset?.name ?? 'PATCHES'}
               </span>
             </button>
+            <button onClick={undoFx} disabled={fxHistoryIdx <= 0}
+              title="Undo FX change (Ctrl+Z)"
+              style={{
+                ...miniBtn, padding: '3px 6px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: 'var(--bg-hover)',
+                color: fxHistoryIdx <= 0 ? 'var(--text-20)' : 'var(--text-60)',
+                opacity: fxHistoryIdx <= 0 ? 0.35 : 1,
+              }}>←</button>
+            <button onClick={redoFx} disabled={fxHistoryIdx >= fxHistory.length - 1}
+              title="Redo FX change (Ctrl+Shift+Z)"
+              style={{
+                ...miniBtn, padding: '3px 6px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: 'var(--bg-hover)',
+                color: fxHistoryIdx >= fxHistory.length - 1 ? 'var(--text-20)' : 'var(--text-60)',
+                opacity: fxHistoryIdx >= fxHistory.length - 1 ? 0.35 : 1,
+              }}>→</button>
             <button onClick={randomize}
               title="Randomize all parameters"
               style={{
@@ -1437,6 +1906,17 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 letterSpacing: '0.15em',
               }}>
               🔗 LINK
+            </button>
+            <button onClick={() => { if (!navigator.requestMIDIAccess) return; setMidiEnabled(v => !v) }}
+              title={!navigator.requestMIDIAccess ? 'MIDI not supported in this browser' : midiEnabled ? `MIDI: ${midiInputName || 'waiting...'}` : 'Enable MIDI input'}
+              style={{
+                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: midiEnabled ? (midiInputName ? 'rgba(16,185,129,0.7)' : 'rgba(245,158,11,0.5)') : 'var(--bg-hover)',
+                color: midiEnabled ? '#fff' : 'var(--text-40)',
+                letterSpacing: '0.15em',
+                opacity: navigator.requestMIDIAccess ? 1 : 0.35,
+              }}>
+              🎹 MIDI
             </button>
             <button onClick={togglePaulMode}
               style={{
@@ -1484,7 +1964,11 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         </PanelHeader>
 
         {/* Scope */}
-        <Scope analyser={engineRef.current?.chain.analyser ?? null} color={accent} height={84} />
+        <Scope analyser={engineRef.current?.chain.analyser ?? null}
+          fftAnalyser={engineRef.current?.fftAnalyser ?? null}
+          color={accent} height={84}
+          mode={scopeMode} onToggleMode={() => setScopeMode(m => m === 'wave' ? 'fft' : 'wave')}
+          voiceCount={activeNotes.size} cpuLatency={cpuLatency} />
 
         {/* Status / src strip */}
         <div style={{
@@ -1562,6 +2046,50 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
             genActive={genEnabled.has('rate')} onRightClick={() => toggleGen('rate')} />
         </div>
 
+        {/* ADSR Envelope */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          padding: '6px 8px 2px',
+        }}>
+          <ADSRDisplay
+            attack={fx.envAttack} decay={fx.envDecay}
+            sustain={fx.envSustain} release={fx.envRelease}
+            accent={accent} width={120} height={36}
+          />
+          <SynthKnob label="ATK" value={fx.envAttack} min={0.001} max={2} size={48} accent={accent} log
+            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ envAttack: v })} />
+          <SynthKnob label="DEC" value={fx.envDecay} min={0.01} max={2} size={48} accent={accent} log
+            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ envDecay: v })} />
+          <SynthKnob label="SUS" value={fx.envSustain} min={0} max={1} size={48} accent={accent}
+            fmt={v => `${(v * 100).toFixed(0)}%`}
+            onChange={v => updateFx({ envSustain: v })} />
+          <SynthKnob label="REL" value={fx.envRelease} min={0.01} max={5} size={48} accent={accent} log
+            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ envRelease: v })} />
+        </div>
+
+        {/* Synth type selector */}
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: 4, padding: '2px 8px',
+        }}>
+          {([
+            ['fm', 'FM'], ['am', 'AM'], ['sine', 'SIN'], ['square', 'SQR'], ['sawtooth', 'SAW'], ['triangle', 'TRI'],
+          ] as const).map(([val, label]) => (
+            <button key={val} onClick={() => { setSynthType(val as typeof synthType); rebuildPolySynth(val as typeof synthType) }}
+              style={{
+                ...miniBtn, padding: '2px 8px', fontSize: 9, letterSpacing: '0.12em',
+                background: synthType === val ? 'rgba(99,102,241,0.35)' : 'var(--bg-hover)',
+                color: synthType === val ? '#c7d2fe' : 'var(--text-40)',
+                border: synthType === val ? '1px solid rgba(99,102,241,0.5)' : '1px solid transparent',
+                transition: 'all 0.15s',
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Shared FX rack */}
         <EffectsRack
           params={fx}
@@ -1570,6 +2098,66 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
           genEnabled={genEnabled as Set<keyof BaseFxParams>}
           onToggleGen={k => toggleGen(k as keyof FxParams)}
         />
+
+        {/* Filter Envelope */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+          borderRadius: 8, background: 'rgba(6,182,212,0.04)',
+          border: '1px solid rgba(6,182,212,0.1)',
+          opacity: fx.fenvDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
+        }}>
+          <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#06b6d4', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>FENV</span>
+          <ADSRDisplay attack={fx.fenvAttack} decay={fx.fenvDecay} sustain={fx.fenvSustain} release={fx.fenvRelease} accent="#06b6d4" width={60} height={30} />
+          <SynthKnob label="ATK" value={fx.fenvAttack} min={0.001} max={2} size={42} accent="#06b6d4" log
+            fmt={v => v < 0.1 ? `${(v*1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ fenvAttack: v })} />
+          <SynthKnob label="DEC" value={fx.fenvDecay} min={0.01} max={2} size={42} accent="#06b6d4" log
+            fmt={v => v < 0.1 ? `${(v*1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ fenvDecay: v })} />
+          <SynthKnob label="SUS" value={fx.fenvSustain} min={0} max={1} size={42} accent="#06b6d4"
+            fmt={v => `${Math.round(v*100)}%`}
+            onChange={v => updateFx({ fenvSustain: v })} />
+          <SynthKnob label="REL" value={fx.fenvRelease} min={0.01} max={5} size={42} accent="#06b6d4" log
+            fmt={v => `${v.toFixed(2)}s`}
+            onChange={v => updateFx({ fenvRelease: v })} />
+          <SynthKnob label="DEPTH" value={fx.fenvDepth} min={0} max={1} size={42} accent="#06b6d4"
+            fmt={v => `${Math.round(v*100)}%`}
+            onChange={v => updateFx({ fenvDepth: v })} />
+        </div>
+
+        {/* LFO */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+          borderRadius: 8, background: 'rgba(236,72,153,0.04)',
+          border: '1px solid rgba(236,72,153,0.1)',
+          opacity: fx.lfoDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
+        }}>
+          <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#ec4899', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>LFO</span>
+          <SynthKnob label="RATE" value={fx.lfoRate} min={0.05} max={20} size={42} accent="#ec4899" log
+            fmt={v => `${v.toFixed(1)}Hz`}
+            onChange={v => updateFx({ lfoRate: v })} />
+          <SynthKnob label="DEPTH" value={fx.lfoDepth} min={0} max={1} size={42} accent="#ec4899"
+            fmt={v => `${Math.round(v*100)}%`}
+            onChange={v => updateFx({ lfoDepth: v })} />
+          <div style={{ display: 'flex', gap: 2 }}>
+            {(['sine', 'triangle', 'sawtooth', 'square'] as LFOWave[]).map(w => (
+              <button key={w} onClick={() => updateFx({ lfoWave: w })}
+                style={{
+                  ...miniBtn, padding: '2px 5px', width: 'auto', fontSize: 'var(--fs-2xs)',
+                  background: fx.lfoWave === w ? 'rgba(236,72,153,0.6)' : 'var(--bg-hover)',
+                  color: fx.lfoWave === w ? '#fff' : 'var(--text-30)',
+                }}>{w === 'sine' ? 'SIN' : w === 'triangle' ? 'TRI' : w === 'sawtooth' ? 'SAW' : 'SQR'}</button>
+            ))}
+          </div>
+          <select value={fx.lfoTarget} onChange={e => updateFx({ lfoTarget: e.target.value })}
+            style={{
+              padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(236,72,153,0.2)',
+              background: 'var(--bg-input)', color: 'var(--text-70)', fontSize: 'var(--fs-2xs)',
+              cursor: 'pointer',
+            }}>
+            {LFO_TARGETS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
 
         {/* Sequencer bar */}
         <div style={{
@@ -1674,7 +2262,15 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
               }}
               style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 50 }}
               title="Gate: <1 silent gap · 1 tie · >1 legato overlap" />
-              
+
+            <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
+              swing {seqSwing === 0 ? 'off' : `${Math.round(seqSwing * 100)}%`}
+            </span>
+            <input type="range" min={0} max={0.9} step={0.01} value={seqSwing}
+              onChange={e => setSeqSwing(Number(e.target.value))}
+              style={{ width: 50, accentColor: '#f59e0b', cursor: 'pointer', flexShrink: 0 }}
+              title="Swing: shuffle timing of off-beat steps" />
+
             <div style={{ paddingLeft: 10, paddingRight: 6, borderLeft: '1px solid rgba(255,255,255,0.08)' }}>
               <VintageToggle 
                 value={analogMode} 
@@ -1690,12 +2286,31 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
           </div>
         </div>
 
-        {/* Piano */}
-        <Piano activeNotes={activeNotes}
-          sequence={activeSequence} seqStep={seqSteps[activeLoopIdx] ?? -1} seqPlaying={seqPlaying}
-          seqColor={LOOP_COLORS[activeLoopIdx % LOOP_COLORS.length]}
-          onNoteOn={noteOn} onNoteOff={noteOff}
-          onToggleSeq={toggleInSequence} />
+        {/* Octave badge + Piano */}
+        <div style={{ position: 'relative' }}>
+          {octaveShift !== 0 && (
+            <div style={{
+              position: 'absolute', top: -2, right: 8, zIndex: 2,
+              padding: '1px 7px', borderRadius: 4,
+              background: 'rgba(99,102,241,0.25)', color: '#a5b4fc',
+              fontSize: 9, fontWeight: 800, fontFamily: 'monospace', letterSpacing: '0.1em',
+            }}>
+              C{3 + octaveShift}–C{5 + octaveShift} ({octaveShift > 0 ? '+' : ''}{octaveShift})
+            </div>
+          )}
+          <Piano activeNotes={activeNotes}
+            sequence={activeSequence} seqStep={seqSteps[activeLoopIdx] ?? -1} seqPlaying={seqPlaying}
+            seqColor={LOOP_COLORS[activeLoopIdx % LOOP_COLORS.length]}
+            onNoteOn={(name, cents) => {
+              const t = transposeNote(name, octaveShift)
+              noteOn(t.name, t.cents)
+            }}
+            onNoteOff={(name) => {
+              const t = transposeNote(name, octaveShift)
+              noteOff(t.name)
+            }}
+            onToggleSeq={toggleInSequence} />
+        </div>
       </div>
     </Rnd>
     {showPresets && createPortal(
@@ -1708,6 +2323,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         onSave={savePreset}
         onDelete={deletePreset}
         onClose={() => setShowPresets(false)}
+        onExport={exportPreset}
+        onImport={importPreset}
       />,
       document.body,
     )}

@@ -1,7 +1,9 @@
+import * as Tone from 'tone'
+
 let sharedCtx: AudioContext | null = null
 
 export function getSharedAudioContext(): AudioContext {
-  if (!sharedCtx) sharedCtx = new AudioContext()
+  if (!sharedCtx) sharedCtx = Tone.getContext().rawContext as AudioContext
   if (sharedCtx.state === 'suspended') sharedCtx.resume()
   return sharedCtx
 }
@@ -16,10 +18,10 @@ let masterCaptureDest: MediaStreamAudioDestinationNode | null = null
 
 export function getMasterCaptureNode(): GainNode {
   if (!masterGain) {
-    const ctx = getSharedAudioContext()
-    masterGain = ctx.createGain()
-    masterCaptureDest = ctx.createMediaStreamDestination()
-    masterGain.connect(ctx.destination)
+    const c = getSharedAudioContext()
+    masterGain = c.createGain()
+    masterCaptureDest = c.createMediaStreamDestination()
+    masterGain.connect(c.destination)
     masterGain.connect(masterCaptureDest)
   }
   return masterGain

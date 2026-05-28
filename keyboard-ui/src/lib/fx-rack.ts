@@ -67,7 +67,7 @@ export function createFxChain(params: FxParams, captureDest?: MediaStreamAudioDe
   const analyser = new Tone.Analyser('waveform', 1024)
   const outputGain = new Tone.Gain(Tone.gainToDb(p.vol) > -Infinity ? p.vol : 0)
 
-  // Wire: input → gate → crush → drive → bite → filter → chorus → phaser → delay → shimmer → reverb → analyser → gain → out
+  // Wire: input → gate → crush → drive → bite → filter → chorus → phaser → delay → shimmer → reverb → analyser → gain → master
   outputGain.connect(getMasterCaptureNode())
   input.chain(gate, bitcrusher, distortion, chebyshev, filter, chorus, phaser, delay, pitchShift, reverb, analyser, outputGain)
 
