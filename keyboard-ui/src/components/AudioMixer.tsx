@@ -4,7 +4,7 @@ import { PanelHeader } from '../lib/PanelHeader'
 import type { SbChannel } from '../lib/types'
 import { captureRegistry } from '../lib/capture-bus'
 import { CaptureIdContext } from '../lib/PanelHeader'
-import { getSharedAudioContext, createCaptureDestination } from '../lib/audio-context'
+import { getSharedAudioContext, createCaptureDestination, getMasterCaptureNode } from '../lib/audio-context'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AudioSession = {
@@ -62,7 +62,7 @@ function getNodes(audioEl: HTMLAudioElement): AudioNodes {
   const analyser = ctx.createAnalyser()
   analyser.fftSize = 64
   source.connect(analyser)
-  analyser.connect(ctx.destination)
+  analyser.connect(getMasterCaptureNode())
   analyser.connect(mixerCaptureDest)
   const nodes = { source, analyser }
   audioNodeMap.set(audioEl, nodes)
@@ -276,7 +276,6 @@ function useMicMonitor() {
   async function toggle() {
     if (active) {
       refs.current?.source.disconnect()
-      refs.current?.ctx.close()
       refs.current?.stream.getTracks().forEach(t => t.stop())
       refs.current = null
       setActive(false)
@@ -284,7 +283,7 @@ function useMicMonitor() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      const ctx = new AudioContext()
+      const ctx = getSharedAudioContext()
       const source = ctx.createMediaStreamSource(stream)
       source.connect(ctx.destination)
       refs.current = { ctx, source, stream }

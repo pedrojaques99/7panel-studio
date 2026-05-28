@@ -7,16 +7,14 @@ import { usePanelCtx } from '../lib/panel-context'
 import { captureRegistry } from '../lib/capture-bus'
 import { CaptureIdContext } from '../lib/PanelHeader'
 import { ParamSlider } from '../lib/ParamSlider'
+import { getSharedAudioContext, getMasterCaptureNode } from '../lib/audio-context'
 
-// Module-level capture context — persists across re-renders, one instance per app
-let _psAudioCtx: AudioContext | null = null
 let _psCaptureDest: MediaStreamAudioDestinationNode | null = null
 let _psCurrentSource: MediaElementAudioSourceNode | null = null
 
 function ensurePsCapture() {
   if (_psCaptureDest) return
-  _psAudioCtx = new AudioContext()
-  _psCaptureDest = _psAudioCtx.createMediaStreamDestination()
+  _psCaptureDest = getSharedAudioContext().createMediaStreamDestination()
 }
 
 function getPsStream(): MediaStream | null {
@@ -230,14 +228,14 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
     a.crossOrigin = 'anonymous'
 
     // Route through capture AudioContext so ExporterPanel can record it
-    if (_psAudioCtx && _psCaptureDest) {
+    if (_psCaptureDest) {
       try {
         _psCurrentSource?.disconnect()
-        const src = _psAudioCtx.createMediaElementSource(a)
+        const ctx = getSharedAudioContext()
+        const src = ctx.createMediaElementSource(a)
         src.connect(_psCaptureDest)
-        src.connect(_psAudioCtx.destination) // keep audible
+        src.connect(getMasterCaptureNode())
         _psCurrentSource = src
-        if (_psAudioCtx.state === 'suspended') _psAudioCtx.resume()
       } catch {
         // fallback: element already has a source node (can only be created once per element)
       }

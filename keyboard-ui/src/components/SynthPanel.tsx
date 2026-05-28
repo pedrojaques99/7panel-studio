@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Rnd } from 'react-rnd'
 import * as Tone from 'tone'
-import Knob from '../lib/vintage-imports/Knob1'
 import { API, isBackendOnline, hasCloudApi, resolveUrl } from '../lib/api'
 import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
@@ -12,6 +11,15 @@ import { CaptureIdContext } from '../lib/PanelHeader'
 import { WHITE_NOTES, NOTE_CENTS, KEY_NOTE, BLACK_KEYS } from '../lib/notes'
 import { BpmControl } from '../lib/BpmControl'
 import { globalClock } from '../lib/global-clock'
+import { SynthKnob } from '../lib/SynthKnob'
+import { EffectsRack } from '../lib/EffectsRack'
+import type { FxParams as BaseFxParams, FxChain } from '../lib/fx-rack'
+import {
+  FX_DEFAULTS as BASE_FX_DEFAULTS,
+  createFxChain, updateFxChain, disposeFxChain,
+  driftFxParams, randomizeFxParams, resolveFxParams,
+} from '../lib/fx-rack'
+import { noteBus } from '../lib/note-bus'
 
 type Note = typeof WHITE_NOTES[number]
 
@@ -157,113 +165,6 @@ type SeqLoop = {
 }
 
 const LOOP_COLORS = ['#a78bfa', '#34d399', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316']
-
-function crushWet(bits: number): number {
-  return bits >= 12 ? 0 : 1
-}
-
-/* ── Controlled knob built on the existing Knob1 SVG ──────────────── */
-
-const KNOB_NATIVE = { w: 81, h: 75 }
-
-function SynthKnob({
-  label, value, min, max, size = 64, fmt, accent = '#00b860', log, genActive: genOn, onRightClick, onChange,
-}: {
-  label: string; value: number; min: number; max: number; size?: number
-  fmt?: (v: number) => string; accent?: string; log?: boolean
-  genActive?: boolean; onRightClick?: () => void; onChange: (v: number) => void
-}) {
-  const [drag, setDrag] = useState(false)
-  const [hover, setHover] = useState(false)
-  const [flash, setFlash] = useState(false)
-  const lastY = useRef(0)
-  const shiftRef = useRef(false)
-  const sc = size / KNOB_NATIVE.w
-  const scaledH = Math.round(KNOB_NATIVE.h * sc)
-  const toNorm = (v: number) => log
-    ? (Math.log(v / min)) / (Math.log(max / min))
-    : (v - min) / (max - min)
-  const fromNorm = (n: number) => log
-    ? min * Math.pow(max / min, n)
-    : min + n * (max - min)
-  const rotation = -135 + toNorm(value) * 270
-  const clamp = (v: number) => Math.max(min, Math.min(max, v))
-
-  useEffect(() => {
-    if (!drag) return
-    const onMove = (e: MouseEvent) => {
-      const dy = lastY.current - e.clientY
-      lastY.current = e.clientY
-      shiftRef.current = e.shiftKey
-      const sensitivity = e.shiftKey ? 0.004 : 0.022
-      const norm = toNorm(value) + dy * sensitivity
-      onChange(clamp(fromNorm(Math.max(0, Math.min(1, norm)))))
-    }
-    const onUp = () => setDrag(false)
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-    return () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-  }, [drag, value, min, max, onChange])
-
-  const onWheel = (e: React.WheelEvent) => {
-    if (!e.ctrlKey && !e.metaKey) return
-    e.preventDefault(); e.stopPropagation()
-    const sensitivity = e.shiftKey ? 0.002 : 0.012
-    const norm = toNorm(value) + (e.deltaY < 0 ? 1 : -1) * sensitivity
-    onChange(clamp(fromNorm(Math.max(0, Math.min(1, norm)))))
-  }
-
-  const onDoubleClick = () => onChange(fromNorm(0.5))
-
-  const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault()
-    if (onRightClick) { onRightClick(); return }
-  }
-
-  return (
-    <div
-      className="select-none"
-      onMouseDown={e => { if (e.button === 0) { setDrag(true); lastY.current = e.clientY; e.preventDefault() } }}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
-      onWheel={onWheel}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={`${label}: ${fmt ? fmt(value) : value.toFixed(2)}\ndrag ↕ · shift fine · ctrl+scroll · dbl-click reset\nright-click: ${genOn ? 'disable' : 'enable'} generative drift`}
-      style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-        cursor: drag ? 'grabbing' : 'grab',
-        opacity: hover || drag ? 1 : 0.85,
-        transition: 'opacity 0.15s',
-      }}
-    >
-      <div style={{
-        width: size, height: scaledH, position: 'relative',
-        filter: flash ? `drop-shadow(0 0 10px ${accent})` : hover ? `drop-shadow(0 0 6px ${accent}44)` : 'none',
-        transition: 'filter 0.15s',
-      }}>
-        <div style={{ transform: `scale(${sc})`, transformOrigin: 'top left', width: KNOB_NATIVE.w, height: KNOB_NATIVE.h }}>
-          <Knob rotation={rotation} />
-        </div>
-      </div>
-      <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 900, letterSpacing: '0.18em', color: genOn ? 'rgba(80,232,104,0.8)' : hover ? 'var(--text-60)' : 'var(--text-40)', textTransform: 'uppercase', transition: 'color 0.15s' }}>{label}</span>
-      <span style={{ fontSize: 'var(--fs-sm)', fontFamily: 'monospace', color: accent, marginTop: -2 }}>
-        {fmt ? fmt(value) : value.toFixed(2)}
-      </span>
-      {genOn !== undefined && (
-        <div style={{
-          width: 5, height: 5, borderRadius: '50%', marginTop: -1,
-          background: genOn ? '#50e868' : 'rgba(255,255,255,0.15)',
-          boxShadow: genOn ? '0 0 6px rgba(80,232,104,0.7)' : 'none',
-          transition: 'all 0.2s',
-        }} />
-      )}
-    </div>
-  )
-}
 
 /* ── Big oscilloscope/spectrum (real-time) ────────────────────────── */
 
@@ -498,33 +399,16 @@ function ensureSynthTap() {
 
 /* ── Audio chain ───────────────────────────────────────────────────── */
 
-type FxParams = {
-  drive: number       // distortion 0..1
-  bite: number        // chebyshev order 1..50 (int)
-  cutoff: number      // filter Hz 80..18000
-  resonance: number   // filter Q 0..20
+/** SynthPanel extends the shared FxParams with player-specific fields */
+type FxParams = BaseFxParams & {
   paul: number        // grainSize seconds 0.05..1.5 (couples overlap)
   rate: number        // playbackRate 0.05..2
-  reverbWet: number   // 0..1
-  reverbDecay: number // seconds 0.5..30
-  vol: number         // 0..1 (linear, will be converted to dB)
-  // Atmospheric FX
-  crush: number       // BitCrusher bits 4..12 (12 = transparent)
-  chorus: number      // wet 0..1 (lush detune shimmer)
-  phaser: number      // wet 0..1 (slow moving fog)
-  delay: number       // wet 0..1 (ping-pong tape echo)
-  delayTime: number   // seconds 0.05..1.5
-  delayFb: number     // feedback 0..0.95
   velocity: number    // note velocity 0.1..1 (scales volume per trigger)
-  denoise: number     // gate threshold 0..1
-  shimmer: number     // pitch shift +12st feedback wet 0..1
 }
 
 const FX_DEFAULTS: FxParams = {
-  drive: 0.15, bite: 4, cutoff: 8000, resonance: 1.5,
-  paul: 0.5, rate: 0.5, reverbWet: 0.55, reverbDecay: 8, vol: 0.7,
-  crush: 12, chorus: 0, phaser: 0, delay: 0, delayTime: 0.4, delayFb: 0.45,
-  velocity: 1, denoise: 0, shimmer: 0,
+  ...BASE_FX_DEFAULTS,
+  paul: 0.5, rate: 0.5, velocity: 1,
 }
 
 /* ── Presets ─────────────────────────────────────────────────────── */
@@ -589,21 +473,8 @@ function saveUserPresets(list: SynthPreset[]) {
   localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(list))
 }
 
-type Fx = {
-  gate: Tone.Gate
-  bitcrusher: Tone.BitCrusher
-  distortion: Tone.Distortion
-  chebyshev: Tone.Chebyshev
-  filter: Tone.Filter
-  chorus: Tone.Chorus
-  phaser: Tone.Phaser
-  delay: Tone.PingPongDelay
-  pitchShift: Tone.PitchShift
-  reverb: Tone.Reverb
-  analyser: Tone.Analyser
-}
 type Engine = {
-  fx: Fx
+  chain: FxChain
   polySynth: Tone.PolySynth
   player: Tone.GrainPlayer | null
 }
@@ -818,59 +689,31 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       if (genRef.current) { clearInterval(genRef.current); genRef.current = null }
       return
     }
+    const nudge = (k: string, v: number, lo: number, hi: number, enabled: Set<keyof FxParams>, strength = 0.04) => {
+      if (!enabled.has(k as keyof FxParams)) return v
+      const d = (Math.random() - 0.5) * 2 * strength * (hi - lo)
+      return Math.max(lo, Math.min(hi, v + d))
+    }
+    const nudgeLog = (k: string, v: number, lo: number, hi: number, enabled: Set<keyof FxParams>, strength = 0.04) => {
+      if (!enabled.has(k as keyof FxParams)) return v
+      const d = (Math.random() - 0.5) * 2 * strength * (Math.log(hi) - Math.log(lo))
+      return Math.max(lo, Math.min(hi, Math.exp(Math.log(v) + d)))
+    }
     const drift = () => {
       const enabled = genEnabledRef.current
       setFx(prev => {
-        const nudge = (k: keyof FxParams, v: number, lo: number, hi: number, strength = 0.04) => {
-          if (!enabled.has(k)) return v
-          const range = hi - lo
-          const d = (Math.random() - 0.5) * 2 * strength * range
-          return Math.max(lo, Math.min(hi, v + d))
-        }
-        const nudgeLog = (k: keyof FxParams, v: number, lo: number, hi: number, strength = 0.04) => {
-          if (!enabled.has(k)) return v
-          const logV = Math.log(v)
-          const logLo = Math.log(lo)
-          const logHi = Math.log(hi)
-          const d = (Math.random() - 0.5) * 2 * strength * (logHi - logLo)
-          return Math.max(lo, Math.min(hi, Math.exp(logV + d)))
-        }
+        // Drift shared FX params
+        const baseDrifted = driftFxParams(prev, enabled as Set<keyof BaseFxParams>)
+        // Drift player-specific params
         const next: FxParams = {
-          ...prev,
-          drive: nudge('drive', prev.drive, 0, 0.5, 0.03),
-          bite: Math.round(nudge('bite', prev.bite, 1, 18, 0.05)),
-          cutoff: nudgeLog('cutoff', prev.cutoff, 400, 15000, 0.02),
-          resonance: nudge('resonance', prev.resonance, 0, 8, 0.03),
-          paul: nudge('paul', prev.paul, 0.1, 1.2, 0.04),
-          rate: nudgeLog('rate', prev.rate, 0.15, 1.5, 0.03),
-          reverbWet: nudge('reverbWet', prev.reverbWet, 0.1, 0.9, 0.03),
-          reverbDecay: nudge('reverbDecay', prev.reverbDecay, 2, 24, 0.025),
-          chorus: prev.chorus > 0 ? nudge('chorus', prev.chorus, 0.05, 0.85, 0.03) : 0,
-          phaser: prev.phaser > 0 ? nudge('phaser', prev.phaser, 0.05, 0.7, 0.03) : 0,
-          delay: prev.delay > 0 ? nudge('delay', prev.delay, 0.05, 0.6, 0.025) : 0,
-          delayTime: prev.delay > 0 ? nudgeLog('delayTime', prev.delayTime, 0.1, 1.2, 0.02) : prev.delayTime,
-          delayFb: prev.delay > 0 ? nudge('delayFb', prev.delayFb, 0.15, 0.7, 0.02) : prev.delayFb,
-          vol: prev.vol,
-          velocity: nudge('velocity', prev.velocity, 0.3, 1, 0.03),
-          crush: prev.crush < 12 ? Math.round(nudge('crush', prev.crush, 4, 10, 0.03)) : 12,
-          denoise: prev.denoise > 0 ? nudge('denoise', prev.denoise, 0.05, 0.8, 0.03) : 0,
-          shimmer: prev.shimmer > 0 ? nudge('shimmer', prev.shimmer, 0.05, 0.85, 0.03) : 0,
+          ...baseDrifted,
+          paul: nudge('paul', prev.paul, 0.1, 1.2, enabled, 0.04),
+          rate: nudgeLog('rate', prev.rate, 0.15, 1.5, enabled, 0.03),
+          velocity: nudge('velocity', prev.velocity, 0.3, 1, enabled, 0.03),
         }
         const e = engineRef.current
         if (e) {
-          e.fx.distortion.distortion = next.drive
-          e.fx.chebyshev.order = Math.max(1, next.bite)
-          e.fx.filter.frequency.rampTo(next.cutoff, 1.5)
-          e.fx.filter.Q.rampTo(next.resonance, 0.8)
-          ;(e.fx.reverb as unknown as Tone.Freeverb).wet.rampTo(next.reverbWet, 0.8)
-          ;(e.fx.reverb as unknown as Tone.Freeverb).roomSize.value = Math.min(0.98, next.reverbDecay / 30)
-          e.fx.chorus.wet.rampTo(next.chorus, 0.8)
-          e.fx.phaser.wet.rampTo(next.phaser, 0.8)
-          e.fx.delay.wet.rampTo(next.delay, 0.8)
-          e.fx.delay.delayTime.rampTo(next.delayTime, 0.8)
-          e.fx.delay.feedback.rampTo(next.delayFb, 0.8)
-          e.fx.pitchShift.wet.rampTo(next.shimmer, 0.8)
-          e.fx.gate.threshold = next.denoise > 0.01 ? -80 + next.denoise * 50 : -100
+          updateFxChain(e.chain, baseDrifted, 0.8)
           if (e.player) {
             applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, next.rate * sampleSpeedRef.current, next.paul)
           }
@@ -949,6 +792,26 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     return () => window.removeEventListener('synth:load', onPs)
   }, [])
 
+  /* listen for note bus (Synesthizer, Drone, etc.) — manual toggle */
+  const [noteBusLinked, setNoteBusLinked] = useState(false)
+  const noteBusLinkedRef = useRef(false)
+  noteBusLinkedRef.current = noteBusLinked
+
+  useEffect(() => {
+    if (!noteBusLinked) return
+    return noteBus.subscribe(panelId, async ev => {
+      const e = engineRef.current ?? await ensureEngine()
+      const noteMs = Math.max(20, ev.durationMs)
+      for (const note of ev.notes) {
+        try { e.polySynth.triggerAttackRelease(note, noteMs / 1000, undefined, ev.velocity * fxRef.current.velocity) } catch { /* noop */ }
+      }
+      setActiveNotes(prev => { const n = new Set(prev); ev.notes.forEach(note => n.add(note)); return n })
+      setTimeout(() => {
+        setActiveNotes(prev => { const n = new Set(prev); ev.notes.forEach(note => n.delete(note)); return n })
+      }, noteMs)
+    })
+  }, [noteBusLinked])
+
   function disposePlayer() {
     const e = engineRef.current; if (!e || !e.player) return
     try { e.player.stop() } catch{ /* noop */ }
@@ -961,18 +824,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     disposePlayer()
     try { e.polySynth.releaseAll() } catch{ /* noop */ }
     try { e.polySynth.dispose() } catch{ /* noop */ }
-    try { e.fx.gate.dispose() } catch{ /* noop */ }
-    try { e.fx.bitcrusher.dispose() } catch{ /* noop */ }
-    try { e.fx.distortion.dispose() } catch{ /* noop */ }
-    try { e.fx.chebyshev.dispose() } catch{ /* noop */ }
-    try { e.fx.filter.dispose() } catch{ /* noop */ }
-    try { e.fx.chorus.dispose() } catch{ /* noop */ }
-    try { e.fx.phaser.dispose() } catch{ /* noop */ }
-    try { e.fx.delay.dispose() } catch{ /* noop */ }
-    try { e.fx.pitchShift.dispose() } catch{ /* noop */ }
-    try { e.fx.reverb.dispose() } catch{ /* noop */ }
-    try { e.fx.analyser.dispose() } catch{ /* noop */ }
-    try { synthOutputGain?.dispose() } catch{ /* noop */ }
+    disposeFxChain(e.chain)
     synthOutputGain = null
     engineRef.current = null
   }
@@ -982,28 +834,13 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     await Tone.start()
     ensureSynthTap()
     const p = fxRef.current
-    const gate = new Tone.Gate(p.denoise > 0.01 ? -80 + p.denoise * 50 : -100)
-    const bitcrusher = new Tone.BitCrusher(Math.max(4, Math.round(p.crush)))
-    bitcrusher.wet.value = crushWet(p.crush)
-    const distortion = new Tone.Distortion({ distortion: p.drive, oversample: 'none', wet: 1 })
-    const chebyshev = new Tone.Chebyshev({ order: Math.max(1, Math.round(p.bite)), oversample: 'none', wet: 0.6 })
-    const filter = new Tone.Filter({ frequency: p.cutoff, type: 'lowpass', Q: p.resonance })
-    const chorus = new Tone.Chorus({ frequency: 0.6, delayTime: 4, depth: 0.7, feedback: 0.15, wet: p.chorus }).start()
-    const phaser = new Tone.Phaser({ frequency: 0.3, octaves: 2, baseFrequency: 350, wet: p.phaser })
-    const delay = new Tone.PingPongDelay({ delayTime: p.delayTime, feedback: p.delayFb, wet: p.delay })
-    const pitchShift = new Tone.PitchShift({ pitch: 12, windowSize: 0.1, delayTime: 0.1, feedback: 0.45, wet: p.shimmer })
-    const reverb = new Tone.Freeverb({ roomSize: Math.min(0.98, p.reverbDecay / 30), dampening: 4000, wet: p.reverbWet })
-    const analyser = new Tone.Analyser('waveform', 1024)
+    const chain = createFxChain(p, synthCaptureDest ?? undefined)
 
-    // Output gain — muted when recorder is active and Synth is deselected
-    const outputGain = new Tone.Gain(synthMonitorEnabled ? 1 : 0)
-    synthOutputGain = outputGain
+    // Override output gain with monitor-aware gain
+    synthOutputGain = chain.outputGain
+    if (!synthMonitorEnabled) chain.outputGain.gain.value = 0
 
-    // Chain: gate → bitcrusher → dist → cheby → filter → chorus → phaser → delay → pitchShift → reverb → analyser → outputGain → out
-    gate.chain(bitcrusher, distortion, chebyshev, filter, chorus, phaser, delay, pitchShift, reverb, analyser, outputGain, Tone.getDestination())
-    if (synthCaptureDest) analyser.connect(synthCaptureDest)
-
-    // PolySynth (FM-ish warm pad) routed through FX head
+    // PolySynth (FM-ish warm pad) routed through FX chain input
     const polySynth = new Tone.PolySynth(Tone.FMSynth, {
       harmonicity: 2.5,
       modulationIndex: 6,
@@ -1011,12 +848,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       modulationEnvelope: { attack: 0.2, decay: 0.4, sustain: 0.5, release: 0.8 },
     })
     polySynth.volume.value = Tone.gainToDb(p.vol * 0.55)
-    polySynth.connect(gate)
+    polySynth.connect(chain.input)
 
-    engineRef.current = {
-      fx: { gate, bitcrusher, distortion, chebyshev, filter, chorus, phaser, delay, pitchShift, reverb, analyser },
-      polySynth, player: null,
-    }
+    engineRef.current = { chain, polySynth, player: null }
     setEngineTick(t => t + 1)
     return engineRef.current
   }
@@ -1034,7 +868,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       player.playbackRate = p.rate * sampleSpeedRef.current
       setPlayerDetune(player, 0)
       player.volume.value = Tone.gainToDb(p.vol * p.velocity)
-      player.connect(e.fx.gate)
+      player.connect(e.chain.input)
       if (trimStart > 0) player.loopStart = trimStart
       if (trimEnd > 0) player.loopEnd = trimEnd
       e.player = player
@@ -1085,24 +919,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       const next = { ...prev, ...patch }
       const e = engineRef.current
       if (e) {
-        if (patch.drive !== undefined) e.fx.distortion.distortion = patch.drive
-        if (patch.bite !== undefined) e.fx.chebyshev.order = Math.max(1, Math.round(patch.bite))
-        if (patch.cutoff !== undefined) e.fx.filter.frequency.rampTo(patch.cutoff, 0.3)
-        if (patch.resonance !== undefined) e.fx.filter.Q.value = patch.resonance
-        if (patch.reverbWet !== undefined) (e.fx.reverb as unknown as Tone.Freeverb).wet.rampTo(patch.reverbWet, 0.05)
-        if (patch.reverbDecay !== undefined) (e.fx.reverb as unknown as Tone.Freeverb).roomSize.value = Math.min(0.98, patch.reverbDecay / 30)
-        if (patch.crush !== undefined) {
-          const b = Math.max(4, Math.round(patch.crush))
-          e.fx.bitcrusher.bits.value = b
-          e.fx.bitcrusher.wet.rampTo(crushWet(b), 0.05)
-        }
-        if (patch.chorus !== undefined) e.fx.chorus.wet.rampTo(patch.chorus, 0.05)
-        if (patch.phaser !== undefined) e.fx.phaser.wet.rampTo(patch.phaser, 0.05)
-        if (patch.delay !== undefined) e.fx.delay.wet.rampTo(patch.delay, 0.05)
-        if (patch.delayTime !== undefined) e.fx.delay.delayTime.rampTo(patch.delayTime, 0.05)
-        if (patch.delayFb !== undefined) e.fx.delay.feedback.rampTo(patch.delayFb, 0.05)
-        if (patch.shimmer !== undefined) e.fx.pitchShift.wet.rampTo(patch.shimmer, 0.05)
-        if (patch.denoise !== undefined) e.fx.gate.threshold = patch.denoise > 0.01 ? -80 + patch.denoise * 50 : -100
+        // Shared FX chain params
+        updateFxChain(e.chain, patch)
+        // Player-specific params
         if (e.player) {
           if (patch.paul !== undefined || patch.rate !== undefined) {
             const nextPaul = patch.paul ?? fxRef.current.paul
@@ -1267,7 +1086,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     ensureSynthTap()
     // Connect analyser → capture dest if not already connected
     if (eng && synthCaptureDest) {
-      try { eng.fx.analyser.connect(synthCaptureDest) } catch { /* already connected */ }
+      try { eng.chain.analyser.connect(synthCaptureDest) } catch { /* already connected */ }
     }
     const stream = getSynthCaptureStream()
     if (!stream) return
@@ -1400,30 +1219,12 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   function randomize() {
     const rnd = (a: number, b: number) => a + Math.random() * (b - a)
     const rndLog = (a: number, b: number) => Math.exp(rnd(Math.log(a), Math.log(b)))
-    // Atmospheric FX ~ each has 50% chance of being engaged at all
-    const chorusOn = Math.random() < 0.55
-    const phaserOn = Math.random() < 0.45
-    const delayOn = Math.random() < 0.6
-    const crushOn = Math.random() < 0.35
+    const baseRnd = randomizeFxParams()
     const next: FxParams = {
-      drive: rnd(0, 0.55),
-      bite: Math.round(rnd(1, 18)),
-      cutoff: rndLog(400, 15000),
-      resonance: rnd(0, 8),
+      ...baseRnd,
       paul: rnd(0.1, 1.2),
       rate: rndLog(0.15, 1.5),
-      reverbWet: rnd(0.3, 0.9),
-      reverbDecay: rnd(3, 22),
-      vol: rnd(0.5, 0.85),
-      crush: crushOn ? Math.round(rnd(4, 8)) : 12,
-      chorus: chorusOn ? rnd(0.3, 0.85) : 0,
-      phaser: phaserOn ? rnd(0.25, 0.7) : 0,
-      delay: delayOn ? rnd(0.2, 0.65) : 0,
-      delayTime: rndLog(0.1, 1.2),
-      delayFb: rnd(0.25, 0.7),
       velocity: rnd(0.5, 1),
-      denoise: Math.random() < 0.3 ? rnd(0.2, 0.6) : 0,
-      shimmer: Math.random() < 0.4 ? rnd(0.2, 0.85) : 0,
     }
     const nextPaulMode = Math.random() < 0.3
     setCurrentPresetId(null)
@@ -1431,21 +1232,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     setFx(next)
     const e = engineRef.current
     if (e) {
-      e.fx.distortion.distortion = next.drive
-      e.fx.chebyshev.order = next.bite
-      e.fx.filter.frequency.rampTo(next.cutoff, 0.1)
-      e.fx.filter.Q.value = next.resonance
-      ;(e.fx.reverb as unknown as Tone.Freeverb).wet.rampTo(next.reverbWet, 0.1)
-      ;(e.fx.reverb as unknown as Tone.Freeverb).roomSize.value = Math.min(0.98, next.reverbDecay / 30)
-      e.fx.bitcrusher.bits.value = next.crush
-      e.fx.bitcrusher.wet.rampTo(crushWet(next.crush), 0.1)
-      e.fx.chorus.wet.rampTo(next.chorus, 0.1)
-      e.fx.phaser.wet.rampTo(next.phaser, 0.1)
-      e.fx.delay.wet.rampTo(next.delay, 0.1)
-      e.fx.delay.delayTime.rampTo(next.delayTime, 0.1)
-      e.fx.delay.feedback.rampTo(next.delayFb, 0.1)
-      e.fx.pitchShift.wet.rampTo(next.shimmer, 0.1)
-      e.fx.gate.threshold = next.denoise > 0.01 ? -80 + next.denoise * 50 : -100
+      updateFxChain(e.chain, baseRnd, 0.1)
       e.polySynth.volume.rampTo(Tone.gainToDb(next.vol * 0.55), 0.1)
       if (e.player) {
         applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, next.rate * sampleSpeedRef.current, next.paul)
@@ -1464,22 +1251,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     setFx(fxFull)
     const e = engineRef.current
     if (e) {
-      e.fx.distortion.distortion = fxFull.drive
-      e.fx.chebyshev.order = Math.max(1, Math.round(fxFull.bite))
-      e.fx.filter.frequency.rampTo(fxFull.cutoff, 0.05)
-      e.fx.filter.Q.value = fxFull.resonance
-      ;(e.fx.reverb as unknown as Tone.Freeverb).wet.rampTo(fxFull.reverbWet, 0.05)
-      ;(e.fx.reverb as unknown as Tone.Freeverb).roomSize.value = Math.min(0.98, fxFull.reverbDecay / 30)
-      const b = Math.max(4, Math.round(fxFull.crush))
-      e.fx.bitcrusher.bits.value = b
-      e.fx.bitcrusher.wet.rampTo(crushWet(b), 0.05)
-      e.fx.chorus.wet.rampTo(fxFull.chorus, 0.05)
-      e.fx.phaser.wet.rampTo(fxFull.phaser, 0.05)
-      e.fx.delay.wet.rampTo(fxFull.delay, 0.05)
-      e.fx.delay.delayTime.rampTo(fxFull.delayTime, 0.05)
-      e.fx.delay.feedback.rampTo(fxFull.delayFb, 0.05)
-      e.fx.pitchShift.wet.rampTo(fxFull.shimmer, 0.05)
-      e.fx.gate.threshold = fxFull.denoise > 0.01 ? -80 + fxFull.denoise * 50 : -100
+      updateFxChain(e.chain, fxFull)
       e.polySynth.volume.rampTo(Tone.gainToDb(fxFull.vol * 0.55), 0.05)
       if (e.player) {
         applyPitchAndSpeed(e.player, getPlayerDetune(e.player), analogModeRef.current, fxFull.rate * sampleSpeedRef.current, fxFull.paul)
@@ -1656,6 +1428,16 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
               }}>
               ◎ GEN
             </button>
+            <button onClick={() => setNoteBusLinked(v => !v)}
+              title={noteBusLinked ? 'Linked — receiving notes from other panels (Synesthizer, etc.)' : 'Link — receive notes from other panels through this FX chain'}
+              style={{
+                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: noteBusLinked ? 'rgba(6,182,212,0.7)' : 'var(--bg-hover)',
+                color: noteBusLinked ? '#fff' : 'var(--text-40)',
+                letterSpacing: '0.15em',
+              }}>
+              🔗 LINK
+            </button>
             <button onClick={togglePaulMode}
               style={{
                 ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
@@ -1702,7 +1484,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         </PanelHeader>
 
         {/* Scope */}
-        <Scope analyser={engineRef.current?.fx.analyser ?? null} color={accent} height={84} />
+        <Scope analyser={engineRef.current?.chain.analyser ?? null} color={accent} height={84} />
 
         {/* Status / src strip */}
         <div style={{
@@ -1767,80 +1549,27 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
             onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
         </div>
 
-        {/* Knob rack — 2 rows × 6 = 12 knobs */}
+        {/* Panel-specific knobs: PAUL + RATE */}
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8, rowGap: 12,
-          padding: '14px 8px 12px', borderRadius: 12,
-          background: 'linear-gradient(180deg,rgba(0,0,0,0.25),rgba(0,0,0,0.15))',
-          border: '1px solid rgba(255,255,255,0.04)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+          display: 'flex', justifyContent: 'center', gap: 24,
+          padding: '10px 8px 4px',
         }}>
-          {/* Row 1 — drive / bite / crush / denoise / cutoff / paul */}
-          <SynthKnob label="DRIVE" value={fx.drive} min={0} max={1} accent="#ef4444"
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ drive: v })}
-            genActive={genEnabled.has('drive')} onRightClick={() => toggleGen('drive')} />
-          <SynthKnob label="BITE" value={fx.bite} min={1} max={50} accent="#f59e0b"
-            fmt={v => String(Math.round(v))} onChange={v => updateFx({ bite: v })}
-            genActive={genEnabled.has('bite')} onRightClick={() => toggleGen('bite')} />
-          <SynthKnob label="CRUSH" value={fx.crush} min={4} max={12} accent="#fb923c"
-            fmt={v => v >= 12 ? '—' : `${Math.round(v)}b`} onChange={v => updateFx({ crush: v })}
-            genActive={genEnabled.has('crush')} onRightClick={() => toggleGen('crush')} />
-          <SynthKnob label="DENOISE" value={fx.denoise} min={0} max={1} accent="#10b981"
-            fmt={v => v < 0.01 ? 'OFF' : `${Math.round(v * 100)}%`} onChange={v => updateFx({ denoise: v })}
-            genActive={genEnabled.has('denoise')} onRightClick={() => toggleGen('denoise')} />
-          <SynthKnob label="CUTOFF" value={fx.cutoff} min={400} max={18000} accent="#06b6d4" log
-            fmt={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`}
-            onChange={v => updateFx({ cutoff: v })}
-            genActive={genEnabled.has('cutoff')} onRightClick={() => toggleGen('cutoff')} />
           <SynthKnob label="PAUL" value={fx.paul} min={0.05} max={1.5} accent="#a78bfa"
             fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ paul: v })}
             genActive={genEnabled.has('paul')} onRightClick={() => toggleGen('paul')} />
-
-          {/* Row 2 — rate / chorus / phaser / delay / reverb / vol */}
           <SynthKnob label="RATE" value={fx.rate} min={0.05} max={2} accent="#a78bfa" log
             fmt={v => `${v.toFixed(2)}×`} onChange={v => updateFx({ rate: v })}
             genActive={genEnabled.has('rate')} onRightClick={() => toggleGen('rate')} />
-          <SynthKnob label="CHORUS" value={fx.chorus} min={0} max={1} accent="#34d399"
-            fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ chorus: v })}
-            genActive={genEnabled.has('chorus')} onRightClick={() => toggleGen('chorus')} />
-          <SynthKnob label="PHASER" value={fx.phaser} min={0} max={1} accent="#c084fc"
-            fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ phaser: v })}
-            genActive={genEnabled.has('phaser')} onRightClick={() => toggleGen('phaser')} />
-          <SynthKnob label="DELAY" value={fx.delay} min={0} max={1} accent="#facc15"
-            fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`}
-            onChange={v => updateFx({ delay: v })}
-            genActive={genEnabled.has('delay')} onRightClick={() => toggleGen('delay')} />
-          <SynthKnob label="REVERB" value={fx.reverbWet} min={0} max={1} accent="#3b82f6"
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ reverbWet: v })}
-            genActive={genEnabled.has('reverbWet')} onRightClick={() => toggleGen('reverbWet')} />
-          <SynthKnob label="VOL" value={fx.vol} min={0} max={1} accent={accent}
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ vol: v })}
-            genActive={genEnabled.has('vol')} onRightClick={() => toggleGen('vol')} />
         </div>
 
-        {/* Secondary knobs */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, rowGap: 12,
-          padding: '10px 8px 8px',
-        }}>
-          <SynthKnob label="RES" value={fx.resonance} min={0} max={20} accent="#22d3ee"
-            fmt={v => v.toFixed(1)} onChange={v => updateFx({ resonance: v })}
-            genActive={genEnabled.has('resonance')} onRightClick={() => toggleGen('resonance')} />
-          <SynthKnob label="DECAY" value={fx.reverbDecay} min={0.5} max={30} accent="#3b82f6"
-            fmt={v => `${v.toFixed(1)}s`} onChange={v => updateFx({ reverbDecay: v })}
-            genActive={genEnabled.has('reverbDecay')} onRightClick={() => toggleGen('reverbDecay')} />
-          <SynthKnob label="SHIMMER" value={fx.shimmer} min={0} max={1} accent="#fbcfe8"
-            fmt={v => v < 0.01 ? '—' : `${Math.round(v * 100)}%`} onChange={v => updateFx({ shimmer: v })}
-            genActive={genEnabled.has('shimmer')} onRightClick={() => toggleGen('shimmer')} />
-          <SynthKnob label="DLY T" value={fx.delayTime} min={0.05} max={1.5} accent="#facc15" log
-            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ delayTime: v })}
-            genActive={genEnabled.has('delayTime')} onRightClick={() => toggleGen('delayTime')} />
-          <SynthKnob label="DLY FB" value={fx.delayFb} min={0} max={0.95} accent="#fb923c"
-            fmt={v => `${Math.round(v * 100)}%`} onChange={v => updateFx({ delayFb: v })}
-            genActive={genEnabled.has('delayFb')} onRightClick={() => toggleGen('delayFb')} />
-        </div>
+        {/* Shared FX rack */}
+        <EffectsRack
+          params={fx}
+          onChange={updateFx}
+          accent={accent}
+          genEnabled={genEnabled as Set<keyof BaseFxParams>}
+          onToggleGen={k => toggleGen(k as keyof FxParams)}
+        />
 
         {/* Sequencer bar */}
         <div style={{

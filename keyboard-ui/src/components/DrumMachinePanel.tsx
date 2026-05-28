@@ -6,6 +6,7 @@ import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
 import { globalClock } from '../lib/global-clock'
+import { getMasterCaptureNode } from '../lib/audio-context'
 
 // ── FX DEFAULTS ─────────────────────────────────────────────────────────────
 type FxParams = {
@@ -177,7 +178,8 @@ export function DrumMachinePanel({ instanceId, onClose }: { instanceId: string; 
   async function ensureEngine() {
     if (engineRef.current) return engineRef.current
     await Tone.start()
-    const bitcrusher = new Tone.BitCrusher(12).toDestination()
+    const bitcrusher = new Tone.BitCrusher(12)
+    bitcrusher.connect(getMasterCaptureNode())
     const reverb = new Tone.Freeverb({ roomSize: 0.8, dampening: 4000, wet: 0 }).connect(bitcrusher)
     const delay = new Tone.PingPongDelay({ delayTime: 0.3, feedback: 0.3, wet: 0 }).connect(reverb)
     const phaser = new Tone.Phaser({ frequency: 0.5, octaves: 2, baseFrequency: 300, wet: 0 }).connect(delay)

@@ -54,6 +54,8 @@ const DrumMachinePanel = React.lazy(() => import('./components/DrumMachinePanel'
 
 const AudioPlayerPanel = React.lazy(() => import('./components/AudioPlayerPanel').then(m => ({ default: m.AudioPlayerPanel })))
 
+const SynesthizerPanel = React.lazy(() => import('./components/SynesthizerPanel').then(m => ({ default: m.SynesthizerPanel })))
+
 const CommandPalette = React.lazy(() => import('./components/CommandPalette').then(m => ({ default: m.CommandPalette })))
 
 import { API, checkBackend, isBackendOnline, resolveUrl } from './lib/api'
@@ -244,6 +246,8 @@ function AppInner() {
 
   const [showAudioPlayer, setShowAudioPlayer] = useState(() => localStorage.getItem('panel-audioplayer') === 'true')
 
+  const [showSynesthizer, setShowSynesthizer] = useState(() => localStorage.getItem('panel-synesthizer') === 'true')
+
   const [retroTVIds, setRetroTVIds] = useState<string[]>(() => {
 
     const saved = localStorage.getItem('panel-retrotv-ids')
@@ -391,6 +395,8 @@ function AppInner() {
   useEffect(() => { localStorage.setItem('panel-visualizer', String(showVisualizer)) }, [showVisualizer])
 
   useEffect(() => { localStorage.setItem('panel-audioplayer', String(showAudioPlayer)) }, [showAudioPlayer])
+
+  useEffect(() => { localStorage.setItem('panel-synesthizer', String(showSynesthizer)) }, [showSynesthizer])
 
   useEffect(() => { localStorage.setItem('panel-retrotv', String(showRetroTV)); localStorage.setItem('panel-retrotv-ids', JSON.stringify(retroTVIds)) }, [retroTVIds])
 
@@ -576,7 +582,7 @@ function AppInner() {
 
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, synth: setShowSynth,
 
-      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer,
+      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer,
 
     }
 
@@ -632,7 +638,7 @@ function AppInner() {
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, paulstretch: setShowPaul,
       synth: setShowSynth, exporter: setShowExporter, converter: setShowConverter,
       looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession,
-      visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer,
+      visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer,
     }
     if (fp.startsWith('synth-')) { setSynthIds(prev => prev.filter(x => x !== fp)); return }
     if (fp.startsWith('retrotv-')) { setRetroTVIds(prev => prev.filter(x => x !== fp)); return }
@@ -832,9 +838,11 @@ function AppInner() {
 
     { id: 'audioplayer',label: 'Audio Library',  icon: '📂', sidebar: isSidebarVisible('audioplayer', true),  visible: showAudioPlayer },
 
+    { id: 'synesthizer',label: 'Synesthizer',   icon: '🎨', sidebar: isSidebarVisible('synesthizer', false), visible: showSynesthizer },
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
 
-  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, sidebarConfig]).filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
+  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, showSynesthizer, sidebarConfig]).filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
 
 
 
@@ -1068,7 +1076,6 @@ function AppInner() {
 
 
   return (
-    <React.Suspense fallback={null}>
     <div
 
       className="flex h-screen overflow-hidden font-['Outfit',sans-serif] text-[var(--text-pure)]"
@@ -1761,6 +1768,8 @@ const action = config.buttons?.[key] || {} as any
 
         {showAudioPlayer && <ErrorBoundary><AudioPlayerPanel onClose={() => setShowAudioPlayer(false)} /></ErrorBoundary>}
 
+        {showSynesthizer && <ErrorBoundary><SynesthizerPanel onClose={() => setShowSynesthizer(false)} /></ErrorBoundary>}
+
                 </div>
 
               </TransformComponent>
@@ -1777,7 +1786,7 @@ const action = config.buttons?.[key] || {} as any
 
         <PresetFloating
 
-          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, drummachine: showDrumMachine, session: showSession, visualizer: showVisualizer, retrotv: showRetroTV, ytdl: showYTDL, audioplayer: showAudioPlayer }}
+          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, drummachine: showDrumMachine, session: showSession, visualizer: showVisualizer, retrotv: showRetroTV, ytdl: showYTDL, audioplayer: showAudioPlayer, synesthizer: showSynesthizer }}
 
           scale={scale}
 
@@ -1910,7 +1919,6 @@ const action = config.buttons?.[key] || {} as any
       </main>
 
     </div>
-    </React.Suspense>
   )
 
 }

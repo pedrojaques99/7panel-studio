@@ -1,4 +1,4 @@
-import { getSharedAudioContext } from './audio-context'
+import { getSharedAudioContext, getMasterCaptureNode } from './audio-context'
 
 // ── Types ──
 
@@ -31,7 +31,7 @@ export function getOrCreateSource(el: HTMLMediaElement): MediaElementAudioSource
   if (!src) {
     const ctx = getSharedAudioContext()
     src = ctx.createMediaElementSource(el)
-    src.connect(ctx.destination)
+    src.connect(getMasterCaptureNode())
     sourceMap.set(el, src)
   }
   return src

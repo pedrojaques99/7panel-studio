@@ -4,6 +4,7 @@ import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
 import { captureRegistry, type CaptureSource } from '../lib/capture-bus'
+import { getSharedAudioContext } from '../lib/audio-context'
 import { createNoise2D } from 'simplex-noise'
 
 const PHI = 1.61803398875
@@ -146,7 +147,7 @@ class GrowthParticle {
 function createMergedAnalyser(sources: CaptureSource[]): { analyser: AnalyserNode; ctx: AudioContext; cleanup: () => void } | null {
   const streams = sources.map(s => s.getStream()).filter(Boolean) as MediaStream[]
   if (streams.length === 0) return null
-  const ctx = new AudioContext()
+  const ctx = getSharedAudioContext()
   const analyser = ctx.createAnalyser()
   analyser.fftSize = 2048
   analyser.smoothingTimeConstant = 0.8
@@ -158,7 +159,7 @@ function createMergedAnalyser(sources: CaptureSource[]): { analyser: AnalyserNod
       nodes.push(src)
     } catch { /* stream may be ended */ }
   })
-  return { analyser, ctx, cleanup: () => { nodes.forEach(n => n.disconnect()); ctx.close() } }
+  return { analyser, ctx, cleanup: () => { nodes.forEach(n => n.disconnect()) } }
 }
 
 function readBands(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>) {

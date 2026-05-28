@@ -28,7 +28,7 @@ function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (
 
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
-  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer'
+  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer' | 'synesthizer'
 
 export type PanelDef = {
   id: PanelId
@@ -84,8 +84,9 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
   const GROUPS: { label: string; ids: PanelId[] }[] = [
     { label: 'Core',  ids: ['keys', 'mixer', 'soundboard'] },
     { label: 'Live',  ids: ['obs', 'ytchat', 'briefing', 'session', 'timer'] },
-    { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab', 'visualizer'] },
-    { label: 'Tools', ids: ['converter', 'exporter', 'ytdl'] },
+    { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab', 'drummachine', 'synesthizer'] },
+    { label: 'Visual', ids: ['visualizer', 'retrotv'] },
+    { label: 'Tools', ids: ['converter', 'exporter', 'ytdl', 'audioplayer'] },
   ]
 
   const filteredAssets = assets.filter(a =>
@@ -106,6 +107,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
         paddingTop: '10vh',
       }}
       onMouseDown={onClose}
+      onWheel={e => e.stopPropagation()}
     >
       <div
         onMouseDown={e => e.stopPropagation()}

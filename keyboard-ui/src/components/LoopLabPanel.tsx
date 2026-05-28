@@ -5,6 +5,7 @@ import { loadGeo, saveGeo } from '../lib/geo'
 import { PanelHeader } from '../lib/PanelHeader'
 import { usePanelCtx } from '../lib/panel-context'
 import { encodeWav } from '../lib/audio-utils'
+import { getSharedAudioContext, getMasterCaptureNode } from '../lib/audio-context'
 
 const PANEL_ID = 'looplab'
 const DEF_GEO = { x: 460, y: 60, w: 520, h: 0 }
@@ -207,7 +208,7 @@ const [_playProgress, setPlayProgress] = useState(0)
 
     const pitchCompensation = pitch - 12 * Math.log2(speed)
     const ps = new Tone.PitchShift({ pitch: pitchCompensation, windowSize: 0.1 })
-    ps.toDestination()
+    ps.connect(getMasterCaptureNode())
     pitchRef.current = ps
 
     const player = new Tone.Player(new Tone.ToneAudioBuffer(audioBuffer))
@@ -234,9 +235,8 @@ const [_playProgress, setPlayProgress] = useState(0)
     setLoading(true)
     try {
       const arr = await file.arrayBuffer()
-      const ctx = new AudioContext()
+      const ctx = getSharedAudioContext()
       const buf = await ctx.decodeAudioData(arr)
-      await ctx.close()
       setAudioBuffer(buf)
       setFileName(file.name)
       setLoopStart(0)

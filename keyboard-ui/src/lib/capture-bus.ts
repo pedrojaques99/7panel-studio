@@ -1,10 +1,19 @@
 import { useSyncExternalStore, useCallback, useMemo } from 'react'
+import { getMasterCaptureStream } from './audio-context'
 
 export type CaptureSource = {
   id: string
   label: string
   getStream: () => MediaStream | null
   setMonitor?: (enabled: boolean) => void
+  isMaster?: boolean
+}
+
+const MASTER_SOURCE: CaptureSource = {
+  id: '__master__',
+  label: 'App (All)',
+  getStream: getMasterCaptureStream,
+  isMaster: true,
 }
 
 const sources = new Map<string, CaptureSource>()
@@ -24,7 +33,7 @@ export const captureRegistry = {
     listeners.forEach(fn => fn())
   },
   list(): CaptureSource[] {
-    return Array.from(sources.values())
+    return [MASTER_SOURCE, ...Array.from(sources.values())]
   },
   subscribe(fn: () => void) {
     listeners.add(fn)

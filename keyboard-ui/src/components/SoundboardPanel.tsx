@@ -9,7 +9,7 @@ import { PanelHeader } from '../lib/PanelHeader'
 import { KeyTile } from '../lib/KeyTile'
 import { captureRegistry } from '../lib/capture-bus'
 import { CaptureIdContext } from '../lib/PanelHeader'
-import { getSharedAudioContext, createCaptureDestination } from '../lib/audio-context'
+import { getSharedAudioContext, createCaptureDestination, getMasterCaptureNode } from '../lib/audio-context'
 
 export type { SbChannel }
 export type SoundKey = { id: string; label: string; emoji: string; src: string; color?: string; trimStart?: number; trimEnd?: number; speed?: number }
@@ -46,7 +46,7 @@ function connectToCapture(a: HTMLAudioElement) {
   const ctx = getSharedAudioContext()
   if (!sbCaptureDest) sbCaptureDest = createCaptureDestination()
   const src = ctx.createMediaElementSource(a)
-  src.connect(ctx.destination)
+  src.connect(getMasterCaptureNode())
   src.connect(sbCaptureDest)
   sbSourceMap.set(a, src)
 }
