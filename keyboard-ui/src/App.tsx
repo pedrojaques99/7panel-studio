@@ -56,6 +56,8 @@ const AudioPlayerPanel = React.lazy(() => import('./components/AudioPlayerPanel'
 
 const SynesthizerPanel = React.lazy(() => import('./components/SynesthizerPanel').then(m => ({ default: m.SynesthizerPanel })))
 
+const AnalogBrainPanel = React.lazy(() => import('./components/AnalogBrainPanel').then(m => ({ default: m.AnalogBrainPanel })))
+
 const CommandPalette = React.lazy(() => import('./components/CommandPalette').then(m => ({ default: m.CommandPalette })))
 
 import { API, checkBackend, isBackendOnline, resolveUrl } from './lib/api'
@@ -108,7 +110,7 @@ const _ICON: Record<string, string> = {
 
   play_audio: 'ðŸ”ˆ',
 
-  open_app:   'ðŸš€',
+  open_app:   '🚀',
 
   run_script: 'ðŸ“œ',
 
@@ -145,6 +147,7 @@ function AppInner() {
   const closeFocusedRef = useRef<() => void>(() => {})
 
   const [isSpacePressed, setIsSpacePressed] = useState(false)
+  const [isMiddleDragging, setIsMiddleDragging] = useState(false)
 
   const [config, setConfig] = useState<Config>({})
 
@@ -247,6 +250,8 @@ function AppInner() {
   const [showAudioPlayer, setShowAudioPlayer] = useState(() => localStorage.getItem('panel-audioplayer') === 'true')
 
   const [showSynesthizer, setShowSynesthizer] = useState(() => localStorage.getItem('panel-synesthizer') === 'true')
+
+  const [showAnalogBrain, setShowAnalogBrain] = useState(() => localStorage.getItem('panel-analogbrain') === 'true')
 
   const [retroTVIds, setRetroTVIds] = useState<string[]>(() => {
 
@@ -397,6 +402,7 @@ function AppInner() {
   useEffect(() => { localStorage.setItem('panel-audioplayer', String(showAudioPlayer)) }, [showAudioPlayer])
 
   useEffect(() => { localStorage.setItem('panel-synesthizer', String(showSynesthizer)) }, [showSynesthizer])
+  useEffect(() => { localStorage.setItem('panel-analogbrain', String(showAnalogBrain)) }, [showAnalogBrain])
 
   useEffect(() => { localStorage.setItem('panel-retrotv', String(showRetroTV)); localStorage.setItem('panel-retrotv-ids', JSON.stringify(retroTVIds)) }, [retroTVIds])
 
@@ -542,6 +548,38 @@ function AppInner() {
 
   }
 
+  function fitToPanels() {
+    const t = transformRef.current
+    if (!t) return
+    const panels = document.querySelectorAll('.panel-drag')
+    if (!panels.length) { t.setTransform(0, 0, 1, 300); setScale(1); return }
+    const s = t.state.scale
+    const px = t.state.positionX
+    const py = t.state.positionY
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    panels.forEach(el => {
+      const r = (el as HTMLElement).getBoundingClientRect()
+      const x = (r.left - 56 - px) / s
+      const y = (r.top - py) / s
+      const w = r.width / s
+      const h = r.height / s
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x + w > maxX) maxX = x + w
+      if (y + h > maxY) maxY = y + h
+    })
+    const PAD = 60
+    const vw = window.innerWidth - 56
+    const vh = window.innerHeight
+    const contentW = maxX - minX + PAD * 2
+    const contentH = maxY - minY + PAD * 2
+    const newScale = Math.min(2, Math.max(0.1, Math.min(vw / contentW, vh / contentH)))
+    const newX = (vw - contentW * newScale) / 2 - (minX - PAD) * newScale
+    const newY = (vh - contentH * newScale) / 2 - (minY - PAD) * newScale
+    t.setTransform(newX, newY, newScale, 300)
+    setScale(newScale)
+  }
+
 
 
   const panelGeoKey: Record<string, string> = {
@@ -582,7 +620,7 @@ function AppInner() {
 
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, synth: setShowSynth,
 
-      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer,
+      exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer, analogbrain: setShowAnalogBrain,
 
     }
 
@@ -800,7 +838,7 @@ function AppInner() {
 
   const panelDefs: PanelDef[] = useMemo(() => [
 
-    { id: 'keys',       label: 'Keyboard',       icon: '⌨️', sidebar: isSidebarVisible('keys', true),        visible: showKeys },
+    { id: 'keys',       label: 'Keyboard',       icon: '🎹', sidebar: isSidebarVisible('keys', true),        visible: showKeys },
 
     { id: 'mixer',      label: 'Audio Mixer',    icon: '🎚️', sidebar: isSidebarVisible('mixer', true),       visible: showMixer },
 
@@ -810,7 +848,7 @@ function AppInner() {
 
     { id: 'ytchat',     label: 'YouTube Chat',   icon: '💬', sidebar: isSidebarVisible('ytchat', true),      visible: showYTChat },
 
-    { id: 'timer',      label: 'Timer',          icon: '⏱',  sidebar: isSidebarVisible('timer', true),       visible: showTimer },
+    { id: 'timer',      label: 'Timer',          icon: '⏰', sidebar: isSidebarVisible('timer', true),       visible: showTimer },
 
     { id: 'briefing',   label: 'Briefing',       icon: '📋', sidebar: isSidebarVisible('briefing', false),   visible: showBriefing },
 
@@ -818,31 +856,32 @@ function AppInner() {
 
     { id: 'drone',      label: 'Drone',          icon: '🌊', sidebar: isSidebarVisible('drone', false),      visible: showDrone },
 
-    { id: 'paul',       label: 'Paulstretch',    icon: '∿',  sidebar: isSidebarVisible('paul', false),       visible: showPaul },
+    { id: 'paul',       label: 'Paulstretch',    icon: '🔊', sidebar: isSidebarVisible('paul', false),       visible: showPaul },
 
-    { id: 'synth',      label: 'Synth',          icon: '🎹', sidebar: isSidebarVisible('synth', true),       visible: showSynth },
+    { id: 'synth',      label: 'Synth',          icon: '🎶', sidebar: isSidebarVisible('synth', true),       visible: showSynth },
 
     { id: 'looplab',    label: 'Loop Lab',       icon: '🔁', sidebar: isSidebarVisible('looplab', false),    visible: showLoopLab },
 
     { id: 'drummachine',label: 'Drum Machine',   icon: '🥁', sidebar: isSidebarVisible('drummachine', true), visible: showDrumMachine },
 
-    { id: 'converter',  label: 'Converter',      icon: '⇄',  sidebar: isSidebarVisible('converter', false),  visible: showConverter },
+    { id: 'converter',  label: 'Converter',      icon: '🔄', sidebar: isSidebarVisible('converter', false),  visible: showConverter },
 
-    { id: 'exporter',   label: 'Exporter',       icon: '⏺',  sidebar: isSidebarVisible('exporter', false),   visible: showExporter },
+    { id: 'exporter',   label: 'Exporter',       icon: '💾', sidebar: isSidebarVisible('exporter', false),   visible: showExporter },
 
     { id: 'visualizer', label: 'Visualizer',     icon: '🌀', sidebar: isSidebarVisible('visualizer', false), visible: showVisualizer },
 
-    { id: 'ytdl',       label: 'YT Download',    icon: '⬇', sidebar: isSidebarVisible('ytdl', false),        visible: showYTDL },
+    { id: 'ytdl',       label: 'YT Download',    icon: '⬇️', sidebar: isSidebarVisible('ytdl', false),       visible: showYTDL },
 
     { id: 'retrotv',    label: 'Retro TV',       icon: '📺', sidebar: isSidebarVisible('retrotv', true),      visible: showRetroTV },
 
     { id: 'audioplayer',label: 'Audio Library',  icon: '📂', sidebar: isSidebarVisible('audioplayer', true),  visible: showAudioPlayer },
 
     { id: 'synesthizer',label: 'Synesthizer',   icon: '🎨', sidebar: isSidebarVisible('synesthizer', false), visible: showSynesthizer },
+    { id: 'analogbrain',label: 'Analog Brain',  icon: '🧠', sidebar: isSidebarVisible('analogbrain', true),  visible: showAnalogBrain },
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
 
-  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, showSynesthizer, sidebarConfig]).filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
+  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, showSynesthizer, showAnalogBrain, sidebarConfig]).filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
 
 
 
@@ -873,11 +912,20 @@ function AppInner() {
 
     const up = (e: KeyboardEvent) => { if (e.key === ' ') setIsSpacePressed(false) }
 
+    const onMouseDown = (e: MouseEvent) => { if (e.button === 1) setIsMiddleDragging(true) }
+    const onMouseUp = (e: MouseEvent) => { if (e.button === 1) setIsMiddleDragging(false) }
+
     window.addEventListener('keydown', down)
-
     window.addEventListener('keyup', up)
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mouseup', onMouseUp)
 
-    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up) }
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
 
   }, [])
 
@@ -967,94 +1015,74 @@ function AppInner() {
 
 
 
+    const canScrollInside = (target: HTMLElement, dy: number, dx: number): boolean => {
+      let node: HTMLElement | null = target
+      const boundary = target.closest?.('.panel-drag')
+      if (!boundary) return false
+      while (node && node !== boundary) {
+        const { overflowY, overflowX } = getComputedStyle(node)
+        const scrollableY = overflowY === 'auto' || overflowY === 'scroll'
+        const scrollableX = overflowX === 'auto' || overflowX === 'scroll'
+        if (scrollableY && dy !== 0) {
+          const atTop = node.scrollTop <= 0 && dy < 0
+          const atBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 1 && dy > 0
+          if (!atTop && !atBottom) return true
+        }
+        if (scrollableX && dx !== 0) {
+          const atLeft = node.scrollLeft <= 0 && dx < 0
+          const atRight = node.scrollLeft + node.clientWidth >= node.scrollWidth - 1 && dx > 0
+          if (!atLeft && !atRight) return true
+        }
+        node = node.parentElement
+      }
+      return false
+    }
+
     const handleCanvasWheel = (e: WheelEvent) => {
 
       if (!transformRef.current) return
+
+      const target = e.target as HTMLElement
+      if (canScrollInside(target, e.deltaY, e.deltaX)) return
 
       e.preventDefault()
 
       const { state } = transformRef.current
 
-
-
+      // Ctrl/Cmd+scroll = zoom toward mouse
       if (e.ctrlKey || e.metaKey) {
-
         const rect = el.getBoundingClientRect()
-
         const cursorX = e.clientX - rect.left
-
         const cursorY = e.clientY - rect.top
-
-        const ZOOM_SENSITIVITY = 0.005
-
-        const factor = Math.pow(2, -e.deltaY * ZOOM_SENSITIVITY)
-
-        const newScale = Math.min(5, Math.max(0.05, state.scale * factor))
-
-        const ratio = newScale / state.scale
-
+        const delta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 10)
+        const ZOOM_SENSITIVITY = 0.008
+        const factor = 1 - delta * ZOOM_SENSITIVITY
+        const clamped = Math.min(5, Math.max(0.05, state.scale * factor))
+        const ratio = clamped / state.scale
         const newX = cursorX - ratio * (cursorX - state.positionX)
-
         const newY = cursorY - ratio * (cursorY - state.positionY)
-
-        transformRef.current.setTransform(newX, newY, newScale, 0)
-
+        transformRef.current.setTransform(newX, newY, clamped, 0)
+        setScale(clamped)
         return
-
       }
 
-
-
+      // Default: pan with inertia
       cancelAnimationFrame(inertiaRef.current)
-
-
-
       const intensity = getScrollIntensity()
-
       const zoomFactor = 1 / Math.max(0.3, state.scale)
-
       const speed = 0.5 * intensity * zoomFactor
-
-
-
       const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
-
       const maxD = 25 + intensity * 15
-
       const dX = clamp(e.deltaX, maxD)
-
       const dY = clamp(e.deltaY, maxD)
-
-
-
       let dx: number, dy: number
-
       if (e.shiftKey) {
-
         dx = -dY * speed; dy = 0
-
       } else {
-
         dx = -dX * speed; dy = -dY * speed
-
       }
-
-
-
       velRef.current = { x: dx * 0.4, y: dy * 0.4 }
-
-      transformRef.current.setTransform(
-
-        state.positionX + dx,
-
-        state.positionY + dy,
-
-        state.scale,
-
-        0,
-
-      )
-
+      transformRef.current.setTransform(state.positionX + dx, state.positionY + dy, state.scale, 0)
       inertiaRef.current = requestAnimationFrame(tickInertia)
 
     }
@@ -1080,7 +1108,7 @@ function AppInner() {
 
       className="flex h-screen overflow-hidden font-['Outfit',sans-serif] text-[var(--text-pure)]"
 
-      style={{ background: 'var(--bg-surface)', cursor: isSpacePressed ? 'grab' : 'default' }}
+      style={{ background: 'var(--bg-surface)', cursor: isMiddleDragging ? 'grabbing' : isSpacePressed ? 'grab' : 'default' }}
 
     >
 
@@ -1102,7 +1130,7 @@ function AppInner() {
 
       <aside
 
-        className="w-[72px] border-r border-white/5 flex flex-col items-center justify-center gap-2 shrink-0 sticky top-0 z-20 overflow-y-auto"
+        className="w-[72px] border-r border-white/5 flex flex-col items-center gap-2 shrink-0 sticky top-0 z-20 overflow-y-auto overflow-x-hidden py-3 scrollbar-hide"
 
         style={{ background: 'linear-gradient(180deg,rgba(22,23,25,0.9) 0%,rgba(12,13,15,0.95) 100%)', backdropFilter: 'blur(20px)', height: '100vh' }}
 
@@ -1120,7 +1148,7 @@ function AppInner() {
 
           className={`sidebar-cmd${showPalette ? ' active' : ''}`}
 
-        >âŒ˜</button>
+        >⌘</button>
 
 
 
@@ -1142,11 +1170,13 @@ function AppInner() {
 
 
 
+        <div className="mt-auto" />
+
         {/* Online status */}
 
         <div
 
-          className="w-2 h-2 rounded-full"
+          className="w-2 h-2 rounded-full shrink-0 mb-1"
 
           style={{
 
@@ -1164,7 +1194,7 @@ function AppInner() {
 
       {/* Free-canvas */}
 
-      <main ref={canvasRef} className="flex-1 relative z-10 overflow-hidden" style={{ minHeight: '100vh' }}>
+      <main ref={canvasRef} className="flex-1 relative z-10 overflow-hidden" style={{ minHeight: '100vh' }} onMouseDown={e => { if (e.button === 1) e.preventDefault() }}>
 
         <TransformWrapper
 
@@ -1188,11 +1218,11 @@ function AppInner() {
 
           panning={{
 
-            activationKeys: [' '],
-
             disabled: false,
 
-            allowLeftClickPan: true,
+            allowLeftClickPan: isSpacePressed,
+
+            allowMiddleClickPan: true,
 
             velocityDisabled: true,
 
@@ -1200,7 +1230,7 @@ function AppInner() {
 
           wheel={{ disabled: true }}
 
-          pinch={{ disabled: false, step: 5 }}
+          pinch={{ disabled: true }}
 
         >
 
@@ -1217,6 +1247,8 @@ function AppInner() {
                 <span>[Shift+Scroll] Pan H</span>
 
                 <span>[Ctrl+Scroll] Zoom</span>
+
+                <span>[Middle Click] Drag</span>
 
                 <span>[Space] Drag</span>
 
@@ -1300,15 +1332,15 @@ function AppInner() {
 
               <div className="fixed bottom-6 left-[96px] z-[100] flex items-center gap-3 px-3 py-2 rounded-xl bg-black/60 backdrop-blur-md border border-white/10 shadow-2xl">
 
-                <button onClick={() => zoomOut(0.15)} aria-label="Zoom out" className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-all text-lg">âˆ’</button>
+                <button onClick={() => zoomOut(0.15)} aria-label="Zoom out" className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-all text-lg font-mono">&minus;</button>
 
                 <div 
 
                   className="px-3 py-1 rounded-lg bg-white/5 cursor-pointer hover:bg-white/10 transition-colors flex flex-col items-center"
 
-                  onClick={() => resetTransform()}
+                  onClick={() => fitToPanels()}
 
-                  title="Click to reset view"
+                  title="Fit to panels (recenter view)"
 
                 >
 
@@ -1318,7 +1350,7 @@ function AppInner() {
 
                 </div>
 
-                <button onClick={() => zoomIn(0.15)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-all text-lg">ï¼‹</button>
+                <button onClick={() => zoomIn(0.15)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-all text-lg font-mono">+</button>
 
               </div>
 
@@ -1536,7 +1568,7 @@ const action = config.buttons?.[key] || {} as any
 
                               style={{ width: 30, height: 30, borderRadius: '50%', border: 'none', cursor: 'pointer', background: isPlaying ? 'var(--status-ok)' : 'var(--bg-btn-silver)', color: isPlaying ? '#000' : 'rgba(255,255,255,0.85)', fontSize: 'var(--fs-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
 
-                            >{isPlaying ? 'â¸' : 'â–¶'}</button>
+                            >{isPlaying ? '⏸' : '▶'}</button>
 
                             {ds && ds.duration > 0 && (
 
@@ -1770,6 +1802,8 @@ const action = config.buttons?.[key] || {} as any
 
         {showSynesthizer && <ErrorBoundary><SynesthizerPanel onClose={() => setShowSynesthizer(false)} /></ErrorBoundary>}
 
+        {showAnalogBrain && <ErrorBoundary><AnalogBrainPanel onClose={() => setShowAnalogBrain(false)} /></ErrorBoundary>}
+
                 </div>
 
               </TransformComponent>
@@ -1963,7 +1997,7 @@ function NavBtn({ active, onClick, title, children }: {
 
     >
 
-      <span className="text-lg" style={{ opacity: active ? 1 : 0.4 }}>{children}</span>
+      <span className="text-lg" style={{ opacity: active ? 1 : 0.4, fontFamily: '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif' }}>{children}</span>
 
     </button>
 

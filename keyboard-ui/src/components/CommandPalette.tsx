@@ -28,7 +28,7 @@ function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (
 
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
-  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer' | 'synesthizer'
+  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer' | 'synesthizer' | 'analogbrain'
 
 export type PanelDef = {
   id: PanelId
@@ -151,7 +151,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
         </div>
 
         {/* Content */}
-        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+        <div className="scrollbar-hide" style={{ overflowY: 'auto', flex: '1 1 0', minHeight: 0 }}>
 
           {/* Panels tab */}
           {tab === 'panels' && (

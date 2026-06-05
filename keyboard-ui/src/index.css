@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Hide scrollbar but keep scroll */
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 :root {
   /* Surfaces & Materials */
   --bg-surface: #0a0a0c;
@@ -80,6 +84,8 @@ html, body {
   background: var(--bg-surface);
   color: var(--text-pure);
   font-family: 'Outfit', sans-serif;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 body.overlay {
@@ -115,6 +121,10 @@ html.overlay {
 @keyframes pulse-rec {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 /* CRT power-off animation (contained inside .retrotv-screen) */
