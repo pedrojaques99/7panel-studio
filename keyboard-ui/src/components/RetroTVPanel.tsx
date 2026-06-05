@@ -559,6 +559,19 @@ export function RetroTVPanel({ instanceId, onClose }: { instanceId: string; onCl
   const captureSources = useCaptureSourceList()
   const panelStream = useCaptureStream(panelSourceId)
 
+  // Auto-link to AnalogBrain when no source is selected
+  const autoLinkedRef = useRef(false)
+  useEffect(() => {
+    if (autoLinkedRef.current || media || panelSourceId) return
+    const brain = captureSources.find(s => s.id === 'analogbrain')
+    if (brain) {
+      setPanelSourceId('analogbrain')
+      setMedia({ type: 'panel', panelId: 'analogbrain' })
+      setIsOn(true)
+      autoLinkedRef.current = true
+    }
+  }, [captureSources, media, panelSourceId])
+
   const [autoRotate, setAutoRotate] = useState<'off' | 'beats' | 'time'>('off')
   const autoRotateRef = useRef<'off' | 'beats' | 'time'>('off')
   autoRotateRef.current = autoRotate

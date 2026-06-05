@@ -608,6 +608,78 @@ def list_assets():
     return jsonify(files)
 
 
+# ── Strudel samples map ─────────────────────────────────────────────────────
+
+EXTRA_SAMPLE_DIRS = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'auto-video-editor-ai', 'scripts', '.render-assets', 'ambient')),
+]
+
+_ALLOWED_SAMPLE_ROOTS: list = []  # populated once in strudel_sample_map
+
+@app.route('/api/samples/strudel-map', methods=['GET'])
+def strudel_sample_map():
+    import re
+    AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.flac', '.webm', '.m4a'}
+    result = {}
+
+    def walk_dir(base_dir, prefix=''):
+        if not os.path.isdir(base_dir):
+            return
+        for root, _dirs, filenames in os.walk(base_dir):
+            audio_files = sorted(
+                f for f in filenames
+                if os.path.splitext(f)[1].lower() in AUDIO_EXTS
+            )
+            if not audio_files:
+                continue
+            rel = os.path.relpath(root, base_dir).replace('\\', '/')
+            slug = re.sub(r'[^a-zA-Z0-9]+', '_', rel).strip('_').lower()
+            if not slug or slug == '.':
+                slug = prefix or 'local'
+            elif prefix:
+                slug = f'{prefix}_{slug}'
+            urls = []
+            for f in audio_files:
+                abs_path = os.path.abspath(os.path.join(root, f))
+                urls.append(abs_path)
+            result[slug] = urls
+
+    samples_dir = os.path.join(os.path.dirname(__file__), 'assets', 'samples')
+    walk_dir(samples_dir)
+    for extra in EXTRA_SAMPLE_DIRS:
+        walk_dir(extra, 'ambient')
+
+    _ALLOWED_SAMPLE_ROOTS.clear()
+    _ALLOWED_SAMPLE_ROOTS.append(os.path.abspath(samples_dir))
+    for extra in EXTRA_SAMPLE_DIRS:
+        _ALLOWED_SAMPLE_ROOTS.append(os.path.abspath(extra))
+
+    return jsonify(result)
+
+
+@app.route('/api/samples/file', methods=['GET'])
+def serve_sample_file():
+    path = request.args.get('path', '')
+    if not path or not os.path.isfile(path):
+        return jsonify({'error': 'not found'}), 404
+    abs_path = os.path.abspath(path)
+    allowed_roots = _ALLOWED_SAMPLE_ROOTS if _ALLOWED_SAMPLE_ROOTS else [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets', 'samples'))
+    ]
+    if not any(abs_path.startswith(root) for root in allowed_roots):
+        return jsonify({'error': 'forbidden'}), 403
+    ext = os.path.splitext(path)[1].lower()
+    mime = {
+        '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
+        '.flac': 'audio/flac', '.webm': 'audio/webm', '.m4a': 'audio/mp4',
+    }.get(ext, 'application/octet-stream')
+    directory = os.path.dirname(abs_path)
+    filename = os.path.basename(abs_path)
+    resp = send_from_directory(directory, filename, mimetype=mime)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+
+
 # ── Waveform peaks (server-side, cached) ────────────────────────────────────
 
 _peaks_cache: dict = {}  # abs_path → [float]

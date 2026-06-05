@@ -60,6 +60,22 @@ function saveMixes(mixes: SbMix[]) {
   localStorage.setItem('soundboard-mixes', JSON.stringify(mixes))
 }
 
+const R2_BASE = 'https://pub-a34407c2e9b94158b151491b952e7441.r2.dev/radio/ambient/pool'
+
+const AMBIENT_SOUNDS: SoundKey[] = [
+  { id: 'amb-rain',    label: 'Forest Rain', emoji: '🌧', src: `${R2_BASE}/forest-rain.mp3`,    color: '#10b981' },
+  { id: 'amb-vinyl',   label: 'Vinyl',       emoji: '📀', src: `${R2_BASE}/vinyl-crackle.mp3`,  color: '#ec4899' },
+  { id: 'amb-fire',    label: 'Fireplace',   emoji: '🔥', src: `${R2_BASE}/fireplace.mp3`,      color: '#f59e0b' },
+  { id: 'amb-birds',   label: 'Birds',       emoji: '🐦', src: `${R2_BASE}/morning-birds.mp3`,  color: '#84cc16' },
+  { id: 'amb-thunder', label: 'Thunder',     emoji: '⛈',  src: `${R2_BASE}/distant-thunder.mp3`, color: '#6366f1' },
+  { id: 'amb-cave',    label: 'Cave',        emoji: '🦇', src: `${R2_BASE}/cave.mp3`,           color: '#4b5563' },
+  { id: 'amb-breeze',  label: 'Breeze',      emoji: '🌾', src: `${R2_BASE}/wheat-breeze.mp3`,   color: '#d97706' },
+  { id: 'amb-library', label: 'Library',     emoji: '📚', src: `${R2_BASE}/library.mp3`,        color: '#78716c' },
+  { id: 'amb-noise',   label: 'Brown Noise', emoji: '🟤', src: `${R2_BASE}/brown-noise.mp3`,    color: '#92400e' },
+  { id: 'amb-aether',  label: 'Aether',      emoji: '✨', src: `${R2_BASE}/aether.mp3`,         color: '#8b5cf6' },
+  { id: 'amb-birds2',  label: 'Birds 2',     emoji: '🕊',  src: `${R2_BASE}/birds-2.mp3`,       color: '#65a30d' },
+]
+
 const COLORS = ['#00b860','#3b82f6','#f59e0b','#ec4899','#8b5cf6','#06b6d4','#f97316','#84cc16']
 const KEY_SIZE = 96
 const GAP = 10
@@ -409,6 +425,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     return () => captureRegistry.unregister('soundboard')
   }, [])
 
+
   const keysRef = useRef(keys)
   // eslint-disable-next-line react-hooks/refs
   keysRef.current = keys
@@ -582,6 +599,18 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
 
   const deleteMix = (id: string) => setMixes(prev => prev.filter(m => m.id !== id))
 
+  const loadAmbientKeys = useCallback(() => {
+    stopAll()
+    audioMap.current.forEach(a => { a.pause(); disconnectFromCapture(a); a.src = '' })
+    audioMap.current.clear()
+    keyRefs.current.clear()
+    const freshKeys = AMBIENT_SOUNDS.map(k => ({ ...k, id: crypto.randomUUID() }))
+    setKeys(freshKeys)
+    const newStates = new Map<string, KeyState>()
+    freshKeys.forEach(k => { newStates.set(k.id, { volume: 60, currentTime: 0, duration: 0 }) })
+    setKeyStates(newStates)
+  }, [stopAll])
+
   const exportMixes = () => {
     const volumes: Record<string, number> = {}
     keys.forEach(k => { volumes[k.id] = keyStates.get(k.id)?.volume ?? 80 })
@@ -675,6 +704,18 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
               )}
               Mixes
             </button>
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              onClick={loadAmbientKeys}
+              title="Load ambient sounds (rain, vinyl, birds, fire...)"
+              style={{
+                height: 22, padding: '0 8px', borderRadius: 'var(--radius-xs)', border: 'none', cursor: 'pointer',
+                background: 'rgba(16,185,129,0.1)',
+                color: 'rgba(16,185,129,0.7)',
+                fontSize: 'var(--fs-sm)', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
+                flexShrink: 0, transition: 'background 0.15s, color 0.15s',
+              }}
+            >Ambient</button>
             <button
               onMouseDown={e => e.stopPropagation()}
               onClick={() => setKeys(prev => [...prev, makeKey()])}
