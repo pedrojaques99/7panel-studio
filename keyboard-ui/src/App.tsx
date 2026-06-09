@@ -340,6 +340,18 @@ function AppInner() {
 
   })
 
+  type SidebarFolder = { id: string; name: string; panelIds: PanelId[]; collapsed: boolean; color: string }
+
+  const FOLDER_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4']
+
+  const [sidebarFolders, setSidebarFolders] = useState<SidebarFolder[]>(() => {
+
+    try { return JSON.parse(localStorage.getItem('sidebar-folders') || '[]') } catch { return [] }
+
+  })
+
+  useEffect(() => { localStorage.setItem('sidebar-folders', JSON.stringify(sidebarFolders)) }, [sidebarFolders])
+
   const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null)
 
   const [ctxSrc, setCtxSrc] = useState('')
@@ -533,6 +545,35 @@ function AppInner() {
 
   }
 
+  function createFolder() {
+    setSidebarFolders(prev => [...prev, { id: `folder-${Date.now()}`, name: 'New Folder', panelIds: [], collapsed: false, color: FOLDER_COLORS[prev.length % FOLDER_COLORS.length] }])
+  }
+  function deleteFolder(folderId: string) {
+    setSidebarFolders(prev => prev.filter(f => f.id !== folderId))
+  }
+  function renameFolder(folderId: string, name: string) {
+    setSidebarFolders(prev => prev.map(f => f.id === folderId ? { ...f, name } : f))
+  }
+  function toggleFolderCollapse(folderId: string) {
+    setSidebarFolders(prev => prev.map(f => f.id === folderId ? { ...f, collapsed: !f.collapsed } : f))
+  }
+  function changeFolderColor(folderId: string) {
+    setSidebarFolders(prev => prev.map(f => {
+      if (f.id !== folderId) return f
+      const idx = (FOLDER_COLORS.indexOf(f.color) + 1) % FOLDER_COLORS.length
+      return { ...f, color: FOLDER_COLORS[idx] }
+    }))
+  }
+  function addPanelToFolder(folderId: string, panelId: PanelId) {
+    setSidebarFolders(prev => prev.map(f => {
+      if (f.id === folderId) return { ...f, panelIds: f.panelIds.includes(panelId) ? f.panelIds : [...f.panelIds, panelId], collapsed: false }
+      return { ...f, panelIds: f.panelIds.filter(p => p !== panelId) }
+    }))
+  }
+  function removePanelFromFolder(panelId: PanelId) {
+    setSidebarFolders(prev => prev.map(f => ({ ...f, panelIds: f.panelIds.filter(p => p !== panelId) })))
+  }
+
 
 
   function getViewportCenter(): { x: number; y: number } {
@@ -619,6 +660,8 @@ function AppInner() {
 
 
 
+  const MULTI_INSTANCE_PANELS = new Set<PanelId>(['synth', 'drummachine', 'retrotv'])
+
   function handleTogglePanel(id: PanelId) {
 
     const setters: Record<PanelId, React.Dispatch<React.SetStateAction<boolean>>> = {
@@ -633,6 +676,16 @@ function AppInner() {
 
     }
 
+    const geoKey = panelGeoKey[id]
+
+    if (geoKey) preSaveSpawnGeo(geoKey)
+
+    setters[id]?.(v => !v)
+
+  }
+
+  function handleAddInstance(id: PanelId) {
+
     if (id === 'synth') {
 
       const newId = `synth-${Date.now()}`
@@ -642,6 +695,8 @@ function AppInner() {
       saveGeo(newId, { x: center.x - 260 + Math.random() * 40, y: center.y - 150 + Math.random() * 40 })
 
       setSynthIds(prev => [...prev, newId])
+
+      setShowSynth(true)
 
     } else if (id === 'retrotv') {
 
@@ -653,6 +708,8 @@ function AppInner() {
 
       setRetroTVIds(prev => [...prev, newId])
 
+      setShowRetroTV(true)
+
     } else if (id === 'drummachine') {
 
       const newId = `drum-${Date.now()}`
@@ -663,13 +720,7 @@ function AppInner() {
 
       setDrumIds(prev => [...prev, newId])
 
-    } else {
-
-      const geoKey = panelGeoKey[id]
-
-      if (geoKey) preSaveSpawnGeo(geoKey)
-
-      setters[id]?.(v => !v)
+      setShowDrumMachine(true)
 
     }
 
@@ -1176,21 +1227,72 @@ function AppInner() {
 
 
 
-        {/* Dynamic sidebar buttons â€” only panels with sidebar=true */}
+        {/* Dynamic sidebar — folders + ungrouped panels */}
 
-        {panelDefs.filter(p => p.sidebar).map(p => (
+        {(() => {
+          const sidebarPanels = panelDefs.filter(p => p.sidebar)
+          const folderedIds = new Set(sidebarFolders.flatMap(f => f.panelIds))
+          const ungrouped = sidebarPanels.filter(p => !folderedIds.has(p.id))
 
-          <NavBtn key={p.id} active={p.visible} onClick={() => handleTogglePanel(p.id)} title={p.label}>
+          return (
+            <>
+              {sidebarFolders.map(folder => {
+                const folderPanels = folder.panelIds.map(id => sidebarPanels.find(p => p.id === id)).filter(Boolean) as PanelDef[]
+                return (
+                  <SidebarFolder
+                    key={folder.id}
+                    folder={folder}
+                    panels={folderPanels}
+                    onTogglePanel={handleTogglePanel}
+                    onAddInstance={handleAddInstance}
+                    multiInstanceIds={MULTI_INSTANCE_PANELS}
+                    onToggleCollapse={() => toggleFolderCollapse(folder.id)}
+                    onRename={(name) => renameFolder(folder.id, name)}
+                    onDelete={() => deleteFolder(folder.id)}
+                    onChangeColor={() => changeFolderColor(folder.id)}
+                    onDropPanel={(panelId) => addPanelToFolder(folder.id, panelId)}
+                    onRemovePanel={removePanelFromFolder}
+                  />
+                )
+              })}
 
-            {p.icon}
+              <div
+                className="flex flex-col items-center gap-2"
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                onDrop={e => { e.preventDefault(); const pid = e.dataTransfer.getData('panel-id'); if (pid) removePanelFromFolder(pid as PanelId) }}
+              >
+                {ungrouped.map(p => (
+                  <NavBtn
+                    key={p.id}
+                    active={p.visible}
+                    onClick={() => handleTogglePanel(p.id)}
+                    title={p.label}
+                    canAdd={MULTI_INSTANCE_PANELS.has(p.id)}
+                    onAdd={() => handleAddInstance(p.id)}
+                    draggable
+                    panelId={p.id}
+                  >
+                    {p.icon}
+                  </NavBtn>
+                ))}
+              </div>
+            </>
+          )
+        })()}
 
-          </NavBtn>
+        {/* Create folder button */}
+        <button
+          onClick={createFolder}
+          title=”Create Folder”
+          aria-label=”Create folder”
+          className=”w-10 h-6 flex items-center justify-center cursor-pointer border border-dashed border-white/10 hover:border-white/30 transition-all rounded-lg”
+          style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, gap: 2 }}
+        >
+          <span style={{ fontSize: 13, lineHeight: 1 }}>+</span>
+          <span style={{ fontSize: 9 }}>📁</span>
+        </button>
 
-        ))}
-
-
-
-        <div className="mt-auto" />
+        <div className=”mt-auto” />
 
         {/* Online status */}
 
@@ -1967,49 +2069,176 @@ const action = config.buttons?.[key] || {} as any
 
 
 
-function NavBtn({ active, onClick, title, children }: {
-
+function NavBtn({ active, onClick, title, children, canAdd, onAdd, draggable, panelId, compact }: {
   active: boolean
-
   onClick: () => void
-
   title: string
-
   children: React.ReactNode
-
+  canAdd?: boolean
+  onAdd?: () => void
+  draggable?: boolean
+  panelId?: string
+  compact?: boolean
 }) {
+  const [hovered, setHovered] = React.useState(false)
+  const size = compact ? 'w-10 h-10' : 'w-12 h-12'
+  const iconSize = compact ? 'text-base' : 'text-lg'
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      draggable={draggable}
+      onDragStart={e => { if (panelId) { e.dataTransfer.setData('panel-id', panelId); e.dataTransfer.effectAllowed = 'move' } }}
+    >
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label={title}
+        className={`${size} flex items-center justify-center cursor-pointer border-none transition-all active:translate-y-0.5 hover:brightness-125`}
+        style={{
+          borderRadius: compact ? '10px' : '14px',
+          background: active ? 'var(--bg-key-on)' : 'transparent',
+          boxShadow: active ? 'var(--shadow-key-on)' : 'none',
+          border: active ? 'none' : '1px solid rgba(255,255,255,0.05)',
+        }}
+      >
+        <span className={iconSize} style={{ opacity: active ? 1 : 0.4, fontFamily: '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif' }}>{children}</span>
+      </button>
+      {canAdd && hovered && (
+        <button
+          onClick={e => { e.stopPropagation(); onAdd?.() }}
+          title={`Add ${title}`}
+          aria-label={`Add new ${title}`}
+          className="absolute flex items-center justify-center cursor-pointer border-none transition-all hover:scale-110 active:scale-95"
+          style={{ top: -4, right: -4, width: 18, height: 18, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 2px 8px rgba(99,102,241,0.5)', color: '#fff', fontSize: 13, fontWeight: 700, lineHeight: 1, zIndex: 10 }}
+        >+</button>
+      )}
+    </div>
+  )
+}
+
+function SidebarFolder({ folder, panels, onTogglePanel, onAddInstance, multiInstanceIds, onToggleCollapse, onRename, onDelete, onChangeColor, onDropPanel, onRemovePanel }: {
+  folder: { id: string; name: string; panelIds: string[]; collapsed: boolean; color: string }
+  panels: PanelDef[]
+  onTogglePanel: (id: PanelId) => void
+  onAddInstance: (id: PanelId) => void
+  multiInstanceIds: Set<PanelId>
+  onToggleCollapse: () => void
+  onRename: (name: string) => void
+  onDelete: () => void
+  onChangeColor: () => void
+  onDropPanel: (panelId: PanelId) => void
+  onRemovePanel: (panelId: PanelId) => void
+}) {
+  const [editing, setEditing] = React.useState(false)
+  const [editName, setEditName] = React.useState(folder.name)
+  const [hovered, setHovered] = React.useState(false)
+  const [dragOver, setDragOver] = React.useState(false)
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
+
+  const handleSubmitName = () => {
+    const trimmed = editName.trim()
+    if (trimmed) onRename(trimmed)
+    setEditing(false)
+  }
+
+  const activeCount = panels.filter(p => p.visible).length
 
   return (
-
-    <button
-
-      onClick={onClick}
-
-      title={title}
-
-      aria-label={title}
-
-      className="w-12 h-12 flex items-center justify-center cursor-pointer border-none transition-all active:translate-y-0.5 hover:brightness-125"
-
-      style={{
-
-        borderRadius: '14px',
-
-        background: active ? 'var(--bg-key-on)' : 'transparent',
-
-        boxShadow: active ? 'var(--shadow-key-on)' : 'none',
-
-        border: active ? 'none' : '1px solid rgba(255,255,255,0.05)',
-
-      }}
-
+    <div
+      className="flex flex-col items-center w-full transition-all"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => { e.preventDefault(); setDragOver(false); const pid = e.dataTransfer.getData('panel-id'); if (pid) onDropPanel(pid as PanelId) }}
     >
+      {/* Folder header */}
+      <div
+        className="flex items-center justify-center cursor-pointer transition-all relative"
+        style={{
+          width: 56, minHeight: 28, borderRadius: 12, padding: '4px 0',
+          background: dragOver ? `${folder.color}33` : `${folder.color}18`,
+          border: dragOver ? `2px dashed ${folder.color}` : `1px solid ${folder.color}44`,
+          marginBottom: folder.collapsed ? 0 : 2,
+        }}
+        onClick={onToggleCollapse}
+        onDoubleClick={e => { e.stopPropagation(); setEditing(true); setEditName(folder.name) }}
+        title={`${folder.name} (${activeCount}/${panels.length} active) — double-click to rename`}
+      >
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            onBlur={handleSubmitName}
+            onKeyDown={e => { if (e.key === 'Enter') handleSubmitName(); if (e.key === 'Escape') setEditing(false) }}
+            onClick={e => e.stopPropagation()}
+            className="border-none outline-none text-center"
+            style={{ width: 48, background: 'transparent', color: folder.color, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em' }}
+          />
+        ) : (
+          <span style={{ color: folder.color, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', maxWidth: 50, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {folder.collapsed ? `${folder.name} (${panels.length})` : folder.name}
+          </span>
+        )}
 
-      <span className="text-lg" style={{ opacity: active ? 1 : 0.4, fontFamily: '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif' }}>{children}</span>
+        {/* Hover actions */}
+        {hovered && !editing && (
+          <>
+            <button
+              onClick={e => { e.stopPropagation(); onChangeColor() }}
+              title="Change color"
+              className="absolute flex items-center justify-center cursor-pointer border-none transition-all hover:scale-125"
+              style={{ top: -5, left: -5, width: 14, height: 14, borderRadius: '50%', background: folder.color, fontSize: 8, color: '#fff', zIndex: 10 }}
+            >●</button>
+            <button
+              onClick={e => { e.stopPropagation(); onDelete() }}
+              title="Delete folder"
+              className="absolute flex items-center justify-center cursor-pointer border-none transition-all hover:scale-125"
+              style={{ top: -5, right: -5, width: 14, height: 14, borderRadius: '50%', background: '#ef4444', fontSize: 9, color: '#fff', zIndex: 10, lineHeight: 1 }}
+            >×</button>
+          </>
+        )}
+      </div>
 
-    </button>
+      {/* Folder contents */}
+      {!folder.collapsed && panels.length > 0 && (
+        <div
+          className="flex flex-col items-center gap-1 pb-1 relative"
+          style={{ borderLeft: `2px solid ${folder.color}33`, marginLeft: 0, paddingLeft: 0 }}
+        >
+          {panels.map(p => (
+            <NavBtn
+              key={p.id}
+              active={p.visible}
+              onClick={() => onTogglePanel(p.id)}
+              title={`${p.label} — drag out to ungroup`}
+              canAdd={multiInstanceIds.has(p.id)}
+              onAdd={() => onAddInstance(p.id)}
+              compact
+              draggable
+              panelId={p.id}
+            >
+              {p.icon}
+            </NavBtn>
+          ))}
+        </div>
+      )}
 
+      {/* Empty folder drop zone */}
+      {!folder.collapsed && panels.length === 0 && (
+        <div
+          className="flex items-center justify-center"
+          style={{ width: 44, height: 32, border: '1px dashed rgba(255,255,255,0.1)', borderRadius: 8, color: 'rgba(255,255,255,0.2)', fontSize: 9 }}
+        >
+          drop
+        </div>
+      )}
+    </div>
   )
-
 }
 

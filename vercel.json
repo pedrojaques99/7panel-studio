@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd keyboard-ui && npm install && npm run build",
+  "outputDirectory": "keyboard-ui/dist",
+  "framework": "vite"
+}
