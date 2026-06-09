@@ -3,7 +3,7 @@ import Knob from './vintage-imports/Knob1'
 
 const KNOB_NATIVE = { w: 81, h: 75 }
 
-export function SynthKnob({
+export const SynthKnob = React.memo(function SynthKnob({
   label, value, min, max, size = 64, fmt, accent = '#00b860', log, genActive: genOn, onRightClick, onChange,
 }: {
   label: string; value: number; min: number; max: number; size?: number
@@ -114,4 +114,4 @@ export function SynthKnob({
       )}
     </div>
   )
-}
+})

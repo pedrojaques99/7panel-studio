@@ -10,7 +10,7 @@ type ADSRDisplayProps = {
   height?: number  // default 36
 }
 
-export function ADSRDisplay({
+export const ADSRDisplay = React.memo(function ADSRDisplay({
   attack, decay, sustain, release,
   accent = '#00b860', width = 120, height = 36,
 }: ADSRDisplayProps) {
@@ -51,4 +51,4 @@ export function ADSRDisplay({
         strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   )
-}
+})

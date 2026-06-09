@@ -18,6 +18,12 @@ sh.Run "cmd /c cd /d """ & base & """ && python -m http.server 4000 --bind 127.0
 sh.Run "cmd /c cd /d """ & base & "\backend"" && python dashboard_server.py", 0, False
 WScript.Sleep 2000
 
+' ─── 2b. AutoHotkey keyboard bridge (F13-F24 → Python actions) ────────────
+Dim ahk : ahk = base & "\backend\keyboard_integration.ahk"
+If fso.FileExists(ahk) Then
+    sh.Run """" & ahk & """", 0, False
+End If
+
 ' ─── 3. YT Bot ─────────────────────────────────────────────────────────────
 sh.Run "cmd /c cd /d """ & base & "\backend"" && python yt_bot.py", 0, False
 WScript.Sleep 1000

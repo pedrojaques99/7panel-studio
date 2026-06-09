@@ -390,6 +390,7 @@ const inp: React.CSSProperties = {
   boxShadow: 'inset 0 6px 15px rgba(0,0,0,.8)',
 }
 
+const DEFAULT_VOL = 10
 type KeyState = { volume: number; currentTime: number; duration: number }
 
 /* ── Main component ── */
@@ -433,16 +434,16 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     if (!onChannelChange) return
     const playing = keysRef.current.filter(k => playingIds.has(k.id))
     const channels: SbChannel[] = playing.map(k => {
-      const st = keyStates.get(k.id) ?? { volume: 80, currentTime: 0, duration: 0 }
+      const st = keyStates.get(k.id) ?? { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }
       return {
         id: k.id, label: k.label, emoji: k.emoji,
         playing: true, ...st,
         setVolume: (v: number) => {
-          setKeyStates(prev => { const m = new Map(prev); m.set(k.id, { ...(m.get(k.id) ?? { volume: 80, currentTime: 0, duration: 0 }), volume: v }); return m })
+          setKeyStates(prev => { const m = new Map(prev); m.set(k.id, { ...(m.get(k.id) ?? { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }), volume: v }); return m })
           const a = audioMap.current.get(k.id); if (a) a.volume = v / 100
         },
         seek: (t: number) => {
-          const a = audioMap.current.get(k.id); if (a) { a.currentTime = t; setKeyStates(prev => { const m = new Map(prev); m.set(k.id, { ...(m.get(k.id) ?? { volume: 80, currentTime: 0, duration: 0 }), currentTime: t }); return m }) }
+          const a = audioMap.current.get(k.id); if (a) { a.currentTime = t; setKeyStates(prev => { const m = new Map(prev); m.set(k.id, { ...(m.get(k.id) ?? { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }), currentTime: t }); return m }) }
         },
         stop: () => stopKey(k.id),
       }
@@ -496,7 +497,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     } else {
       src = audioSrc(key.src)
     }
-    const vol = volume ?? (keyStates.get(key.id)?.volume ?? 80)
+    const vol = volume ?? (keyStates.get(key.id)?.volume ?? DEFAULT_VOL)
     const initSt = { volume: vol, currentTime: 0, duration: 0 }
     let a = audioMap.current.get(key.id)
     if (!a) {
@@ -566,7 +567,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
   /* ── Mix actions ── */
   const saveMix = (name: string) => {
     const volumes: Record<string, number> = {}
-    keys.forEach(k => { volumes[k.id] = keyStates.get(k.id)?.volume ?? 80 })
+    keys.forEach(k => { volumes[k.id] = keyStates.get(k.id)?.volume ?? DEFAULT_VOL })
     const mix: SbMix = { id: crypto.randomUUID(), name, keys: [...keys], volumes, createdAt: Date.now() }
     setMixes(prev => [...prev, mix])
   }
@@ -577,7 +578,7 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     const remapped = mix.keys.map(k => ({ ...k, id: crypto.randomUUID() }))
     const volMap = new Map<string, number>()
     mix.keys.forEach((orig, i) => {
-      volMap.set(remapped[i].id, mix.volumes[orig.id] ?? 80)
+      volMap.set(remapped[i].id, mix.volumes[orig.id] ?? DEFAULT_VOL)
     })
     // clear old audio (disconnect sources to free MediaElementAudioSourceNode)
     audioMap.current.forEach(a => { a.pause(); disconnectFromCapture(a); a.src = '' })
@@ -586,13 +587,13 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
 
     setKeys(remapped)
     const newStates = new Map<string, KeyState>()
-    remapped.forEach(k => { newStates.set(k.id, { volume: volMap.get(k.id) ?? 80, currentTime: 0, duration: 0 }) })
+    remapped.forEach(k => { newStates.set(k.id, { volume: volMap.get(k.id) ?? DEFAULT_VOL, currentTime: 0, duration: 0 }) })
     setKeyStates(newStates)
 
     // auto-play all keys that have a src
     setTimeout(() => {
       remapped.forEach(k => {
-        if (k.src) playKey(k, volMap.get(k.id) ?? 80)
+        if (k.src) playKey(k, volMap.get(k.id) ?? DEFAULT_VOL)
       })
     }, 50)
   }, [stopAll, playKey])
@@ -607,13 +608,25 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
     const freshKeys = AMBIENT_SOUNDS.map(k => ({ ...k, id: crypto.randomUUID() }))
     setKeys(freshKeys)
     const newStates = new Map<string, KeyState>()
-    freshKeys.forEach(k => { newStates.set(k.id, { volume: 60, currentTime: 0, duration: 0 }) })
+    freshKeys.forEach(k => { newStates.set(k.id, { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }) })
     setKeyStates(newStates)
   }, [stopAll])
 
+  const hiddenAmbient = AMBIENT_SOUNDS.filter(amb =>
+    !keys.some(k => k.src === amb.src)
+  )
+
+  const restoreAmbient = (ambSrc: string) => {
+    const amb = AMBIENT_SOUNDS.find(a => a.src === ambSrc)
+    if (!amb) return
+    const fresh: SoundKey = { ...amb, id: crypto.randomUUID() }
+    setKeys(prev => [...prev, fresh])
+    setKeyStates(prev => { const m = new Map(prev); m.set(fresh.id, { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }); return m })
+  }
+
   const exportMixes = () => {
     const volumes: Record<string, number> = {}
-    keys.forEach(k => { volumes[k.id] = keyStates.get(k.id)?.volume ?? 80 })
+    keys.forEach(k => { volumes[k.id] = keyStates.get(k.id)?.volume ?? DEFAULT_VOL })
     const currentMix: SbMix = {
       id: crypto.randomUUID(),
       name: 'Exported Mix',
@@ -716,6 +729,26 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
                 flexShrink: 0, transition: 'background 0.15s, color 0.15s',
               }}
             >Ambient</button>
+            {hiddenAmbient.length > 0 && hiddenAmbient.length < AMBIENT_SOUNDS.length && (
+              <select
+                onMouseDown={e => e.stopPropagation()}
+                onChange={e => { if (e.target.value) { restoreAmbient(e.target.value); e.target.value = '' } }}
+                value=""
+                title="Restore hidden ambient sound"
+                style={{
+                  height: 22, padding: '0 4px', borderRadius: 'var(--radius-xs)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(16,185,129,0.06)', color: 'rgba(16,185,129,0.7)',
+                  fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer',
+                  flexShrink: 0, outline: 'none',
+                }}
+              >
+                <option value="" disabled>+{hiddenAmbient.length} hidden</option>
+                {hiddenAmbient.map(a => (
+                  <option key={a.id} value={a.src}>{a.emoji} {a.label}</option>
+                ))}
+              </select>
+            )}
             <button
               onMouseDown={e => e.stopPropagation()}
               onClick={() => setKeys(prev => [...prev, makeKey()])}
@@ -780,32 +813,37 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
                         e.stopPropagation()
                         const r = e.currentTarget.getBoundingClientRect()
                         const v = Math.round(Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)))
-                        setKeyStates(prev => { const m = new Map(prev); m.set(key.id, { ...(m.get(key.id) ?? { volume: 80, currentTime: 0, duration: 0 }), volume: v }); return m })
+                        setKeyStates(prev => { const m = new Map(prev); m.set(key.id, { ...(m.get(key.id) ?? { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }), volume: v }); return m })
                         const a = audioMap.current.get(key.id); if (a) a.volume = v / 100
                       }}
                       onMouseMove={e => {
                         if (e.buttons !== 1) return
                         const r = e.currentTarget.getBoundingClientRect()
                         const v = Math.round(Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100)))
-                        setKeyStates(prev => { const m = new Map(prev); m.set(key.id, { ...(m.get(key.id) ?? { volume: 80, currentTime: 0, duration: 0 }), volume: v }); return m })
+                        setKeyStates(prev => { const m = new Map(prev); m.set(key.id, { ...(m.get(key.id) ?? { volume: DEFAULT_VOL, currentTime: 0, duration: 0 }), volume: v }); return m })
                         const a = audioMap.current.get(key.id); if (a) a.volume = v / 100
                       }}
                       style={{
                         position: 'absolute', bottom: 0, left: 0, right: 0,
-                        height: 18, cursor: 'ew-resize',
+                        height: 28, cursor: 'ew-resize',
                         display: 'flex', alignItems: 'flex-end',
-                        padding: '0 8px 5px',
+                        padding: '0 6px 6px',
                         opacity: 0, transition: 'opacity 0.15s',
                       }}
                     >
-                      <div style={{ flex: 1, height: 3, borderRadius: 2, background: 'var(--border-light)', overflow: 'hidden' }}>
+                      <div style={{ flex: 1, height: 4, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', position: 'relative' }}>
                         <div style={{
-                          height: '100%', borderRadius: 2,
-                          width: `${keyStates.get(key.id)?.volume ?? 80}%`,
+                          height: '100%', borderRadius: 3,
+                          width: `${keyStates.get(key.id)?.volume ?? DEFAULT_VOL}%`,
                           background: accent,
                           transition: 'width 0.05s',
                         }} />
                       </div>
+                      <span className="sb-vol-pct" style={{
+                        fontSize: 9, fontWeight: 900, fontFamily: 'monospace',
+                        color: accent, marginLeft: 4, minWidth: 24, textAlign: 'right',
+                        opacity: 0, transition: 'opacity 0.15s',
+                      }}>{keyStates.get(key.id)?.volume ?? DEFAULT_VOL}%</span>
                     </div>
                   )}
 
@@ -869,7 +907,9 @@ export function SoundboardPanel({ onClose, onChannelChange }: {
       <style>{`
         .sb-drag:active { cursor:grabbing !important; }
         .sb-key-wrap:hover .sb-key-remove { opacity:1 !important; }
-        .sb-key-wrap:hover .sb-vol-bar { opacity:1 !important; }
+        .sb-key-wrap:hover .sb-vol-bar { opacity:1 !important; height:36px !important; }
+        .sb-key-wrap:hover .sb-vol-bar div:first-child { height:6px !important; }
+        .sb-key-wrap:hover .sb-vol-pct { opacity:1 !important; }
         .sb-header-add:hover { background:rgba(255,255,255,0.12) !important; color:rgba(255,255,255,0.7) !important; }
         .sb-header-mixes:hover { background:rgba(255,255,255,0.12) !important; color:rgba(255,255,255,0.7) !important; }
       `}</style>

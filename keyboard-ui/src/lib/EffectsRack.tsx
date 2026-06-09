@@ -13,7 +13,14 @@ type Props = {
   showSecondary?: boolean
 }
 
-export function EffectsRack({
+function setsEqual<T>(a: Set<T> | undefined, b: Set<T> | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
+}
+
+export const EffectsRack = React.memo(function EffectsRack({
   params, onChange, accent = '#00b860', compact = false, knobSize,
   genEnabled, onToggleGen, showSecondary = true,
 }: Props) {
@@ -90,4 +97,13 @@ export function EffectsRack({
       )}
     </div>
   )
-}
+}, (prev, next) =>
+  prev.params === next.params &&
+  prev.onChange === next.onChange &&
+  prev.accent === next.accent &&
+  prev.compact === next.compact &&
+  prev.knobSize === next.knobSize &&
+  prev.onToggleGen === next.onToggleGen &&
+  prev.showSecondary === next.showSecondary &&
+  setsEqual(prev.genEnabled, next.genEnabled)
+)

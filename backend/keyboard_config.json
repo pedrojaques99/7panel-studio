@@ -22,7 +22,7 @@
         },
         "key_f13": {
             "label": "Foguete Invisível (Sem Limites)",
-            "path": "Z:\\jaques.dsgn\\sfx  music\\foguete.mp3",
+            "path": "Z:\\jaques.dsgn\\sfx_music\\foguete.mp3",
             "type": "play_audio"
         },
         "key_f14": {
@@ -40,25 +40,31 @@
         "key_f16": {
             "args": "",
             "label": "som_ytpbr_musica-triste.mp3",
-            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\som_ytpbr_musica-triste.mp3",
+            "path": "Z:\\Cursor\\7panel_studio\\backend\\assets\\som_ytpbr_musica-triste.mp3",
             "type": "play_audio"
         },
         "key_f17": {
             "args": "",
             "label": "surprise-sound-effect-99300.mp3",
-            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\surprise-sound-effect-99300.mp3",
+            "path": "Z:\\Cursor\\7panel_studio\\backend\\assets\\surprise-sound-effect-99300.mp3",
             "type": "play_audio"
         },
         "key_f18": {
             "args": "",
             "label": "puta-mano.mp3",
-            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\puta-mano.mp3",
+            "path": "Z:\\Cursor\\7panel_studio\\backend\\assets\\puta-mano.mp3",
+            "type": "play_audio"
+        },
+        "key_f22": {
+            "args": "",
+            "label": "",
+            "path": "",
             "type": "play_audio"
         },
         "key_f23": {
             "args": "",
             "label": "News",
-            "path": "C:\\Users\\Usuario\\Downloads\\Windows mini_keyobard\\New English software is set in the upgrade model-20240908\\assets\\desifreemusic-stealth-mission-secret-spy-background-music-for-covert-ops-512649.mp3",
+            "path": "Z:\\Cursor\\7panel_studio\\backend\\assets\\desifreemusic-stealth-mission-secret-spy-background-music-for-covert-ops-512649.mp3",
             "type": "play_audio"
         },
         "key_f24": {
@@ -67,11 +73,10 @@
             "path": "https://www.youtube.com/watch?v=TkQ-S0nvcGg",
             "type": "play_audio"
         },
-        "key_f22": {
+        "key_f21": {
             "type": "play_audio",
-            "path": "",
-            "args": "",
-            "label": ""
+            "label": "foguete",
+            "path": "Z:\\jaques.dsgn\\sfx_music\\foguete.mp3"
         }
     },
     "commands": {

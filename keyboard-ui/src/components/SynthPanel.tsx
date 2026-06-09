@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Rnd } from 'react-rnd'
 import * as Tone from 'tone'
@@ -22,8 +22,8 @@ import {
 } from '../lib/fx-rack'
 import { noteBus } from '../lib/note-bus'
 import { requestMIDIAccess, createMIDIListener, listMIDIInputs } from '../lib/midi'
-import { FilterEnvParams, FILTER_ENV_DEFAULTS, createFilterEnvelope, updateFilterEnvelope, triggerFilterEnvAttack, triggerFilterEnvRelease, disposeFilterEnvelope } from '../lib/filter-envelope'
-import { LFOParams, LFO_DEFAULTS, LFO_TARGETS, type LFOWave, createLFO, connectLFO, disconnectLFO, updateLFO, disposeLFO } from '../lib/lfo'
+import { type FilterEnvParams, FILTER_ENV_DEFAULTS, createFilterEnvelope, updateFilterEnvelope, triggerFilterEnvAttack, triggerFilterEnvRelease, disposeFilterEnvelope } from '../lib/filter-envelope'
+import { type LFOParams, LFO_DEFAULTS, LFO_TARGETS, type LFOWave, createLFO, connectLFO, disconnectLFO, updateLFO, disposeLFO } from '../lib/lfo'
 
 type Note = typeof WHITE_NOTES[number]
 
@@ -94,7 +94,15 @@ function applyPitchAndSpeed(player: any, cents: number, analogMode: boolean, rat
   }
 }
 
-function TrimSlider({ trimStart, trimEnd, duration, accent, onChange }: {
+// Stable format functions (shared across renders)
+const fmtPaul = (v: number) => `${v.toFixed(2)}s`
+const fmtRate = (v: number) => `${v.toFixed(2)}×`
+const fmtTime2 = (v: number) => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`
+const fmtPct = (v: number) => `${Math.round(v * 100)}%`
+const fmtSec = (v: number) => `${v.toFixed(2)}s`
+const fmtHz = (v: number) => `${v.toFixed(1)}Hz`
+
+const TrimSlider = React.memo(function TrimSlider({ trimStart, trimEnd, duration, accent, onChange }: {
   trimStart: number; trimEnd: number; duration: number; accent: string
   onChange: (start: number, end: number) => void
 }) {
@@ -151,7 +159,7 @@ function TrimSlider({ trimStart, trimEnd, duration, accent, onChange }: {
       )}
     </div>
   )
-}
+})
 
 function fmtTime(s: number): string {
   if (!s || s < 0) return '0:00'
@@ -183,20 +191,27 @@ const LOOP_COLORS = ['#a78bfa', '#34d399', '#f59e0b', '#ef4444', '#06b6d4', '#ec
 
 /* ── Big oscilloscope/spectrum (real-time) ────────────────────────── */
 
-function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onToggleMode, voiceCount = 0, cpuLatency = 0 }: {
+const Scope = React.memo(function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onToggleMode, voiceCountRef, activeNotesRef }: {
   analyser: Tone.Analyser | null; fftAnalyser: Tone.Analyser | null; color: string; height?: number
   mode?: 'wave' | 'fft'; onToggleMode?: () => void
-  voiceCount?: number; cpuLatency?: number
+  voiceCountRef?: React.RefObject<number>; activeNotesRef?: React.RefObject<Set<string>>
 }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const raf = useRef<number>(0)
   const modeRef = useRef(mode); modeRef.current = mode
+  const cpuRef = useRef<HTMLSpanElement>(null)
+  const voiceRef = useRef<HTMLSpanElement>(null)
+  const cpuDotRef = useRef<HTMLDivElement>(null)
+  const cpuWrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const activeAnalyser = modeRef.current === 'fft' ? fftAnalyser : analyser
     if (!activeAnalyser && !analyser) return
+    let frame = 0
     function draw() {
       raf.current = requestAnimationFrame(draw)
+      // Throttle canvas to ~30fps — audio thread is priority
+      if (++frame % 2 !== 0) return
       const c = ref.current; if (!c) return
       const ctx = c.getContext('2d')!
       const w = c.width, h = c.height
@@ -241,12 +256,26 @@ function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onTog
         ctx.stroke()
         ctx.shadowBlur = 0
       }
+
+      // Update overlay DOM elements directly — no React re-render
+      const vc = activeNotesRef?.current?.size ?? 0
+      if (voiceRef.current) {
+        voiceRef.current.textContent = `${vc}/64`
+        voiceRef.current.style.color = vc > 0 ? color : 'rgba(255,255,255,0.25)'
+      }
+      if (frame % 60 === 0) {
+        try {
+          const lat = (Tone.getContext().rawContext as AudioContext).baseLatency * 1000
+          const cpuColor = lat < 10 ? '#34d399' : lat < 20 ? '#f59e0b' : '#ef4444'
+          if (cpuRef.current) cpuRef.current.textContent = `${lat.toFixed(0)}ms`
+          if (cpuDotRef.current) cpuDotRef.current.style.background = cpuColor
+          if (cpuWrapRef.current) cpuWrapRef.current.style.color = cpuColor
+        } catch { /* noop */ }
+      }
     }
     draw()
     return () => cancelAnimationFrame(raf.current)
   }, [analyser, fftAnalyser, color])
-
-  const cpuColor = cpuLatency < 10 ? '#34d399' : cpuLatency < 20 ? '#f59e0b' : '#ef4444'
 
   return (
     <div style={{ position: 'relative' }}>
@@ -256,7 +285,9 @@ function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onTog
         boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04)',
       }} />
       {onToggleMode && (
-        <button onClick={onToggleMode} style={{
+        <button onClick={onToggleMode}
+          aria-label={`Switch to ${mode === 'wave' ? 'FFT spectrum' : 'waveform'} view`}
+          style={{
           position: 'absolute', top: 4, left: 6, padding: '1px 6px',
           fontSize: 9, fontFamily: 'monospace', fontWeight: 800,
           background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.5)',
@@ -264,25 +295,32 @@ function Scope({ analyser, fftAnalyser, color, height = 84, mode = 'wave', onTog
           letterSpacing: '0.1em',
         }}>{mode === 'wave' ? 'WAVE' : 'FFT'}</button>
       )}
-      <span style={{
+      <span ref={voiceRef} style={{
         position: 'absolute', top: 4, right: 6,
         fontSize: 9, fontFamily: 'monospace', fontWeight: 800,
-        color: voiceCount > 0 ? color : 'rgba(255,255,255,0.25)',
-      }}>{voiceCount}/64</span>
-      <div title={`Audio latency: ${cpuLatency.toFixed(1)}ms`} style={{
+        color: 'rgba(255,255,255,0.25)',
+      }}>0/64</span>
+      <div ref={cpuWrapRef} title="Audio latency" style={{
         position: 'absolute', bottom: 4, right: 6,
-        display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, fontFamily: 'monospace', color: cpuColor,
+        display: 'flex', alignItems: 'center', gap: 3, fontSize: 9, fontFamily: 'monospace', color: '#34d399',
       }}>
-        <div style={{ width: 5, height: 5, borderRadius: '50%', background: cpuColor }} />
-        {cpuLatency.toFixed(0)}ms
+        <div ref={cpuDotRef} style={{ width: 5, height: 5, borderRadius: '50%', background: '#34d399' }} />
+        <span ref={cpuRef}>0ms</span>
       </div>
     </div>
   )
-}
+})
 
 /* ── Piano keyboard (horizontal, white + black) ──────────────────── */
 
-function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa', onNoteOn, onNoteOff, onToggleSeq }: {
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a === b) return true
+  if (a.size !== b.size) return false
+  for (const v of a) if (!b.has(v)) return false
+  return true
+}
+
+const Piano = React.memo(function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa', onNoteOn, onNoteOff, onToggleSeq }: {
   activeNotes: Set<string>
   sequence: SeqStep[]
   seqStep: number
@@ -344,7 +382,7 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
   })
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', height: 110, userSelect: 'none', touchAction: 'none' }}>
+    <div ref={containerRef} role="group" aria-label="Piano keyboard" style={{ position: 'relative', height: 110, userSelect: 'none', touchAction: 'none' }}>
       {/* White keys */}
       <div style={{ display: 'flex', gap: 2, height: '100%' }}>
         {whitesArr.map(n => {
@@ -452,7 +490,16 @@ function Piano({ activeNotes, sequence, seqStep, seqPlaying, seqColor = '#a78bfa
       </div>
     </div>
   )
-}
+}, (prev, next) =>
+  setsEqual(prev.activeNotes, next.activeNotes) &&
+  prev.sequence === next.sequence &&
+  prev.seqStep === next.seqStep &&
+  prev.seqPlaying === next.seqPlaying &&
+  prev.seqColor === next.seqColor &&
+  prev.onNoteOn === next.onNoteOn &&
+  prev.onNoteOff === next.onNoteOff &&
+  prev.onToggleSeq === next.onToggleSeq
+)
 
 /* ── Module-level capture (shared per-app) ─────────────────────────── */
 
@@ -565,60 +612,6 @@ type Engine = {
 }
 
 /* ── YT downloader (mini) ─────────────────────────────────────────── */
-
-function YtDownloader({ onLoaded, disabled }: {
-  onLoaded: (url: string, label: string) => void; disabled?: boolean
-}) {
-  const [url, setUrl] = useState('')
-  const [start, setStart] = useState('')
-  const [end, setEnd] = useState('')
-  const [state, setState] = useState<'idle' | 'loading' | 'err'>('idle')
-  const [err, setErr] = useState('')
-
-  async function go() {
-    const u = url.trim(); if (!u) return
-    setState('loading'); setErr('')
-    try {
-      const params = new URLSearchParams({ url: u })
-      if (start.trim()) params.set('start', start.trim())
-      if (end.trim()) params.set('end', end.trim())
-      const r = await fetch(resolveUrl(`/api/yt-download?${params}`))
-      const d = await r.json()
-      if (d.error) { setState('err'); setErr(d.error); return }
-      const label = u.split('v=')[1]?.slice(0, 11) || 'yt-sample'
-      onLoaded(resolveUrl(`/api/preview?path=${encodeURIComponent(d.path)}`), label)
-      setState('idle')
-    } catch (e) { setState('err'); setErr(String(e)) }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5,
-      padding: '8px 10px', borderRadius: 8,
-      background: 'rgba(255,0,0,0.04)', border: '1px solid rgba(255,80,80,0.14)' }}>
-      <input value={url} onChange={e => setUrl(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && go()}
-        placeholder="https://youtube.com/watch?v=…"
-        style={{ ...inp, fontSize: 'var(--fs-base)' }} />
-      <div style={{ display: 'flex', gap: 4 }}>
-        <input value={start} onChange={e => setStart(e.target.value)}
-          placeholder="start  0:30" style={{ ...inp, flex: 1, fontSize: 'var(--fs-sm)' }} />
-        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-20)', alignSelf: 'center' }}>→</span>
-        <input value={end} onChange={e => setEnd(e.target.value)}
-          placeholder="end  1:45" style={{ ...inp, flex: 1, fontSize: 'var(--fs-sm)' }} />
-        <button onClick={go} disabled={!url.trim() || disabled || state === 'loading'}
-          style={{ ...miniBtn, padding: '3px 10px', fontSize: 'var(--fs-sm)',
-            background: state === 'loading' ? 'rgba(255,255,255,0.05)' : 'rgba(239,68,68,0.7)',
-            color: state === 'loading' ? 'var(--text-20)' : '#fff' }}>
-          {state === 'loading' ? '⏳' : '↓'}
-        </button>
-      </div>
-      {state === 'err' && (
-        <span style={{ fontSize: 'var(--fs-xs)', color: '#ef4444', fontFamily: 'monospace',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={err}>{err}</span>
-      )}
-    </div>
-  )
-}
 
 /* ── Preset menu (popup) ──────────────────────────────────────────── */
 
@@ -764,7 +757,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const sampleSpeedRef = useRef(1)
   const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set())
   const [isRecording, setIsRecording] = useState(false)
-  const [recElapsed, setRecElapsed] = useState(0)
+  const recElapsedRef = useRef(0)
+  const recTimerSpanRef = useRef<HTMLSpanElement>(null)
+  const recTimerTitleRef = useRef<HTMLButtonElement>(null)
   const [recStatus, setRecStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [lastRecPath, setLastRecPath] = useState<string | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -775,11 +770,11 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   // Generative drift
   const [genEnabled, setGenEnabled] = useState<Set<keyof FxParams>>(new Set())
   const genRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const toggleGen = (key: keyof FxParams) => setGenEnabled(prev => {
+  const toggleGen = useCallback((key: keyof FxParams) => setGenEnabled(prev => {
     const next = new Set(prev)
     if (next.has(key)) next.delete(key); else next.add(key)
     return next
-  })
+  }), [])
   const genActive = genEnabled.size > 0
 
   const genEnabledRef = useRef(genEnabled)
@@ -835,6 +830,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   // Undo/Redo for FX params
   const [fxHistory, setFxHistory] = useState<FxParams[]>([FX_DEFAULTS])
   const [fxHistoryIdx, setFxHistoryIdx] = useState(0)
+  const fxHistoryIdxRef = useRef(0)
+  fxHistoryIdxRef.current = fxHistoryIdx
   const lastFxPushRef = useRef(0)
 
   function pushFxHistory(params: FxParams) {
@@ -842,7 +839,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     if (now - lastFxPushRef.current < 500) return
     lastFxPushRef.current = now
     setFxHistory(prev => {
-      const trimmed = prev.slice(0, fxHistoryIdx + 1)
+      const trimmed = prev.slice(0, fxHistoryIdxRef.current + 1)
       const next = [...trimmed, params]
       if (next.length > 30) next.shift()
       return next
@@ -885,6 +882,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   // Sequencer — multi-loop
   const [loops, setLoops] = useState<SeqLoop[]>([{ steps: [], muted: false }])
   const [activeLoopIdx, setActiveLoopIdx] = useState(0)
+  const activeLoopIdxRef = useRef(0); activeLoopIdxRef.current = activeLoopIdx
   const [seqPlaying, setSeqPlaying] = useState(false)
   const [seqSteps, setSeqSteps] = useState<number[]>([-1]) // per-loop step index for UI
   const [seqBpm, setSeqBpm] = useState(80)
@@ -905,9 +903,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   seqGateRef.current = seqGate
   const seqSwingRef = useRef(seqSwing)
   seqSwingRef.current = seqSwing
-  const activeSequence = loops[activeLoopIdx]?.steps ?? []
-  const totalSteps = loops.reduce((s, l) => s + (l.muted ? 0 : l.steps.length), 0)
-  const hasAnyContent = loops.some(l => l.steps.length > 0 || (l.freestyle && l.freestyle.length > 0))
+  const activeSequence = useMemo(() => loops[activeLoopIdx]?.steps ?? [], [loops, activeLoopIdx])
+  const totalSteps = useMemo(() => loops.reduce((s, l) => s + (l.muted ? 0 : l.steps.length), 0), [loops])
+  const hasAnyContent = useMemo(() => loops.some(l => l.steps.length > 0 || (l.freestyle && l.freestyle.length > 0)), [loops])
 
   // Freestyle loop recording
   const [freestyleRec, setFreestyleRec] = useState(false)
@@ -922,17 +920,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   // Force re-render of Scope when engine becomes available (analyser ref change)
   const [, setEngineTick] = useState(0)
   const [scopeMode, setScopeMode] = useState<'wave' | 'fft'>('wave')
-  const [cpuLatency, setCpuLatency] = useState(0)
+  const activeNotesRef = useRef(activeNotes); activeNotesRef.current = activeNotes
 
   useEffect(() => { saveUserPresets(userPresets) }, [userPresets])
-
-  // CPU latency polling
-  useEffect(() => {
-    const id = setInterval(() => {
-      try { setCpuLatency((Tone.getContext().rawContext as AudioContext).baseLatency * 1000) } catch {}
-    }, 2000)
-    return () => clearInterval(id)
-  }, [])
 
   /* register capture */
   useEffect(() => {
@@ -983,48 +973,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null)
   const [midiInputName, setMidiInputName] = useState('')
   const midiListenerRef = useRef<ReturnType<typeof createMIDIListener> | null>(null)
-
-  useEffect(() => {
-    if (!midiEnabled) {
-      midiListenerRef.current?.stop()
-      midiListenerRef.current = null
-      setMidiInputName('')
-      return
-    }
-    let cancelled = false
-    let accessRef: MIDIAccess | null = null
-    ;(async () => {
-      const access = await requestMIDIAccess()
-      if (cancelled) return
-      if (!access) { setMidiEnabled(false); return }
-      setMidiAccess(access)
-      accessRef = access
-      const listener = createMIDIListener({
-        noteOn: (noteName, _velocity) => {
-          const wCents = NOTE_CENTS[noteName as Note]
-          if (wCents !== undefined) { noteOn(noteName, wCents) }
-          else { const bk = BLACK_KEYS.find(k => k.label === noteName); if (bk) noteOn(noteName, bk.cents) }
-        },
-        noteOff: (noteName) => { noteOff(noteName) },
-        cc: (controller, value) => {
-          if (controller === 1) { setFx(prev => ({ ...prev, cutoff: 200 + (value / 127) * 15800 })) }
-        },
-        pitchBend: (value) => {
-          const e = engineRef.current
-          if (e?.player) applyPitchAndSpeed(e.player, value * 200, analogModeRef.current, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
-        },
-      })
-      midiListenerRef.current = listener
-      function connectFirst(acc: MIDIAccess) {
-        const inputs = listMIDIInputs(acc)
-        if (inputs.length > 0) { listener.start(inputs[0]); setMidiInputName(inputs[0].name ?? 'MIDI Device') }
-        else { setMidiInputName('') }
-      }
-      connectFirst(access)
-      access.onstatechange = () => { if (!cancelled) connectFirst(access) }
-    })()
-    return () => { cancelled = true; midiListenerRef.current?.stop(); midiListenerRef.current = null; if (accessRef) accessRef.onstatechange = null }
-  }, [midiEnabled, noteOn, noteOff])
+  const noteOnRef = useRef<(noteName: string, cents: number) => void>(() => {})
+  const noteOffRef = useRef<(noteName: string) => void>(() => {})
 
   function disposePlayer() {
     const e = engineRef.current; if (!e || !e.player) return
@@ -1187,26 +1137,31 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   async function handleUrlLoad() {
     const raw = urlInput.trim(); if (!raw) return
     if (/youtube\.com|youtu\.be/.test(raw)) {
-      if (!isBackendOnline() && !hasCloudApi()) { console.warn('YouTube download requires backend'); return }
+      if (!isBackendOnline() && !hasCloudApi()) {
+        setSrcLabel('YouTube requires backend server')
+        return
+      }
       setStatus('loading'); setSrcLabel(raw.split('v=')[1]?.slice(0, 11) || 'yt-sample')
       try {
         const params = new URLSearchParams({ url: raw })
         const r = await fetch(resolveUrl(`/api/yt-download?${params}`))
         const d = await r.json()
-        if (d.error) { console.error('YT error', d.error); setStatus('idle'); return }
+        if (d.error) { setSrcLabel(`YT error: ${d.error}`); setStatus('idle'); return }
         await loadFromUrl(resolveUrl(`/api/preview?path=${encodeURIComponent(d.path)}`), raw.split('v=')[1]?.slice(0, 11) || 'yt-sample')
-      } catch (e) { console.error('YT download error', e); setStatus('idle') }
+      } catch (e) { setSrcLabel('YT download failed'); setStatus('idle') }
       return
     }
     if (raw.startsWith('http')) {
       loadFromUrl(raw, raw.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'sample')
     } else if (isBackendOnline()) {
       loadFromUrl(resolveUrl(`/api/preview?path=${encodeURIComponent(raw)}`), raw.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'sample')
+    } else {
+      setSrcLabel('Server paths require backend')
     }
   }
 
   /* live param updates */
-  function updateFx(patch: Partial<FxParams>) {
+  const updateFx = useCallback(function updateFx(patch: Partial<FxParams>) {
     setFx(prev => {
       const next = { ...prev, ...patch }
       pushFxHistory(next)
@@ -1275,7 +1230,7 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
       }
       return next
     })
-  }
+  }, [])
 
   function togglePaulMode() {
     const enable = !paulMode
@@ -1286,15 +1241,15 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
 
   /* ── Sequencer (multi-loop) ── */
 
-  function toggleInSequence(noteName: string, cents: number, e?: React.MouseEvent) {
+  const toggleInSequence = useCallback((noteName: string, cents: number, e?: React.MouseEvent) => {
     const velocity = e?.shiftKey ? 1.0 : 0.8
     setLoops(prev => prev.map((loop, i) => {
-      if (i !== activeLoopIdx) return loop
+      if (i !== activeLoopIdxRef.current) return loop
       const idx = loop.steps.findIndex(s => s.noteName === noteName)
       if (idx >= 0) return { ...loop, steps: loop.steps.filter((_, j) => j !== idx) }
       return { ...loop, steps: [...loop.steps, { noteName, cents, velocity }] }
     }))
-  }
+  }, [])
 
   function addLoop() {
     setLoops(prev => {
@@ -1486,18 +1441,26 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     }
     recorder.start(200)
     recorderRef.current = recorder
-    setIsRecording(true); setRecElapsed(0)
+    setIsRecording(true); recElapsedRef.current = 0
     const t0 = Date.now()
-    recTimerRef.current = setInterval(() => setRecElapsed(Math.floor((Date.now() - t0) / 1000)), 500)
+    recTimerRef.current = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - t0) / 1000)
+      recElapsedRef.current = elapsed
+      const m = Math.floor(elapsed / 60)
+      const s = String(elapsed % 60).padStart(2, '0')
+      if (recTimerSpanRef.current) recTimerSpanRef.current.textContent = `⏹ ${m}:${s}`
+      if (recTimerTitleRef.current) recTimerTitleRef.current.title = `Gravando… ${m}:${s} — clique para parar e salvar MP3`
+    }, 500)
   }
 
   function stopRecording() {
     if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null }
+    recElapsedRef.current = 0
     if (recorderRef.current && recorderRef.current.state !== 'inactive') {
       recorderRef.current.stop()
     }
     recorderRef.current = null
-    setIsRecording(false); setRecElapsed(0)
+    setIsRecording(false); recElapsedRef.current = 0
   }
 
   function startFreestyleRec() {
@@ -1712,9 +1675,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     input.click()
   }
 
-  const currentPreset = currentPresetId
+  const currentPreset = useMemo(() => currentPresetId
     ? FACTORY_PRESETS.find(p => p.id === currentPresetId) ?? userPresets.find(p => p.id === currentPresetId) ?? null
-    : null
+    : null, [currentPresetId, userPresets])
 
   async function toggleDrone() {
     const e = await ensureEngine()
@@ -1761,6 +1724,51 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     try { e.polySynth.triggerRelease(noteName) } catch{ /* noop */ }
     if (e.filterEnv && fxRef.current.fenvDepth > 0) triggerFilterEnvRelease(e.filterEnv)
   }, [])
+
+  noteOnRef.current = noteOn
+  noteOffRef.current = noteOff
+
+  useEffect(() => {
+    if (!midiEnabled) {
+      midiListenerRef.current?.stop()
+      midiListenerRef.current = null
+      setMidiInputName('')
+      return
+    }
+    let cancelled = false
+    let accessRef: MIDIAccess | null = null
+    ;(async () => {
+      const access = await requestMIDIAccess()
+      if (cancelled) return
+      if (!access) { setMidiEnabled(false); return }
+      setMidiAccess(access)
+      accessRef = access
+      const listener = createMIDIListener({
+        noteOn: (noteName, _velocity) => {
+          const wCents = NOTE_CENTS[noteName as Note]
+          if (wCents !== undefined) { noteOnRef.current(noteName, wCents) }
+          else { const bk = BLACK_KEYS.find(k => k.label === noteName); if (bk) noteOnRef.current(noteName, bk.cents) }
+        },
+        noteOff: (noteName) => { noteOffRef.current(noteName) },
+        cc: (controller, value) => {
+          if (controller === 1) { setFx(prev => ({ ...prev, cutoff: 200 + (value / 127) * 15800 })) }
+        },
+        pitchBend: (value) => {
+          const e = engineRef.current
+          if (e?.player) applyPitchAndSpeed(e.player, value * 200, analogModeRef.current, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
+        },
+      })
+      midiListenerRef.current = listener
+      function connectFirst(acc: MIDIAccess) {
+        const inputs = listMIDIInputs(acc)
+        if (inputs.length > 0) { listener.start(inputs[0]); setMidiInputName(inputs[0].name ?? 'MIDI Device') }
+        else { setMidiInputName('') }
+      }
+      connectFirst(access)
+      access.onstatechange = () => { if (!cancelled) connectFirst(access) }
+    })()
+    return () => { cancelled = true; midiListenerRef.current?.stop(); midiListenerRef.current = null; if (accessRef) accessRef.onstatechange = null }
+  }, [midiEnabled])
 
   /* Undo/Redo keyboard shortcut */
   useEffect(() => {
@@ -1813,10 +1821,60 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     }
   }, [noteOn, noteOff])
 
+  // Stable callbacks for memoized children
+  const handlePianoNoteOn = useCallback((name: string, cents: number) => {
+    const t = transposeNote(name, octaveShiftRef.current)
+    noteOn(t.name, t.cents)
+  }, [noteOn])
+
+  const handlePianoNoteOff = useCallback((name: string) => {
+    const t = transposeNote(name, octaveShiftRef.current)
+    noteOff(t.name)
+  }, [noteOff])
+
+  const handleScopeToggle = useCallback(() => setScopeMode(m => m === 'wave' ? 'fft' : 'wave'), [])
+
+  // Stable knob callbacks
+  const onPaulChange = useCallback((v: number) => updateFx({ paul: v }), [updateFx])
+  const onRateChange = useCallback((v: number) => updateFx({ rate: v }), [updateFx])
+  const onEnvAttackChange = useCallback((v: number) => updateFx({ envAttack: v }), [updateFx])
+  const onEnvDecayChange = useCallback((v: number) => updateFx({ envDecay: v }), [updateFx])
+  const onEnvSustainChange = useCallback((v: number) => updateFx({ envSustain: v }), [updateFx])
+  const onEnvReleaseChange = useCallback((v: number) => updateFx({ envRelease: v }), [updateFx])
+  const onFenvAttackChange = useCallback((v: number) => updateFx({ fenvAttack: v }), [updateFx])
+  const onFenvDecayChange = useCallback((v: number) => updateFx({ fenvDecay: v }), [updateFx])
+  const onFenvSustainChange = useCallback((v: number) => updateFx({ fenvSustain: v }), [updateFx])
+  const onFenvReleaseChange = useCallback((v: number) => updateFx({ fenvRelease: v }), [updateFx])
+  const onFenvDepthChange = useCallback((v: number) => updateFx({ fenvDepth: v }), [updateFx])
+  const onLfoRateChange = useCallback((v: number) => updateFx({ lfoRate: v }), [updateFx])
+  const onLfoDepthChange = useCallback((v: number) => updateFx({ lfoDepth: v }), [updateFx])
+  const onLfoWaveChange = useCallback((w: string) => updateFx({ lfoWave: w as any }), [updateFx])
+  const onLfoTargetChange = useCallback((t: string) => updateFx({ lfoTarget: t }), [updateFx])
+
+  const toggleGenPaul = useCallback(() => toggleGen('paul'), [toggleGen])
+  const toggleGenRate = useCallback(() => toggleGen('rate'), [toggleGen])
+
+  const [advancedMode, setAdvancedMode] = useState(false)
+  const [showTools, setShowTools] = useState(false)
+  const toolsBtnRef = useRef<HTMLButtonElement>(null)
+  const toolsMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showTools) return
+    function onClickOutside(e: MouseEvent) {
+      if (toolsBtnRef.current?.contains(e.target as Node)) return
+      if (toolsMenuRef.current?.contains(e.target as Node)) return
+      setShowTools(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [showTools])
+
   const accent = paulMode ? '#a78bfa' : '#00b860'
   const hasSample = !!loadedUrl
   const droneReady = hasSample && status !== 'loading'
   const playing = status === 'playing'
+  const toolsActive = midiEnabled || noteBusLinked || paulMode
 
   return (
     <CaptureIdContext.Provider value={panelId}>
@@ -1839,8 +1897,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         display: 'flex', flexDirection: 'column', gap: 12,
       }}>
         <PanelHeader title="// Synth" onClose={onClose} className="synth-drag">
-          <div onMouseDown={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div onMouseDown={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <button ref={presetBtnRef} onClick={() => setShowPresets(v => !v)}
+              aria-label="Patches" aria-expanded={showPresets}
               title="Patches"
               style={{
                 ...miniBtn, padding: '3px 10px', width: 'auto', fontSize: 'var(--fs-sm)',
@@ -1854,23 +1913,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 {currentPreset?.name ?? 'PATCHES'}
               </span>
             </button>
-            <button onClick={undoFx} disabled={fxHistoryIdx <= 0}
-              title="Undo FX change (Ctrl+Z)"
-              style={{
-                ...miniBtn, padding: '3px 6px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: 'var(--bg-hover)',
-                color: fxHistoryIdx <= 0 ? 'var(--text-20)' : 'var(--text-60)',
-                opacity: fxHistoryIdx <= 0 ? 0.35 : 1,
-              }}>←</button>
-            <button onClick={redoFx} disabled={fxHistoryIdx >= fxHistory.length - 1}
-              title="Redo FX change (Ctrl+Shift+Z)"
-              style={{
-                ...miniBtn, padding: '3px 6px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: 'var(--bg-hover)',
-                color: fxHistoryIdx >= fxHistory.length - 1 ? 'var(--text-20)' : 'var(--text-60)',
-                opacity: fxHistoryIdx >= fxHistory.length - 1 ? 0.35 : 1,
-              }}>→</button>
             <button onClick={randomize}
+              aria-label="Randomize all parameters"
               title="Randomize all parameters"
               style={{
                 ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
@@ -1880,55 +1924,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
               }}>
               🎲 RND
             </button>
-            <button onClick={() => {
-                if (genActive) { setGenEnabled(new Set()) }
-                else {
-                  const all = new Set<keyof FxParams>(Object.keys(FX_DEFAULTS) as (keyof FxParams)[])
-                  all.delete('vol')
-                  setGenEnabled(all)
-                }
-              }}
-              title={genActive ? 'Disable all generative drift (or right-click individual knobs)' : 'Enable generative drift on all params (right-click to toggle individual)'}
-              style={{
-                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: genActive ? 'rgba(16,185,129,0.55)' : 'var(--bg-hover)',
-                color: genActive ? '#fff' : 'var(--text-40)',
-                letterSpacing: '0.15em',
-              }}>
-              ◎ GEN
-            </button>
-            <button onClick={() => setNoteBusLinked(v => !v)}
-              title={noteBusLinked ? 'Linked — receiving notes from other panels (Synesthizer, etc.)' : 'Link — receive notes from other panels through this FX chain'}
-              style={{
-                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: noteBusLinked ? 'rgba(6,182,212,0.7)' : 'var(--bg-hover)',
-                color: noteBusLinked ? '#fff' : 'var(--text-40)',
-                letterSpacing: '0.15em',
-              }}>
-              🔗 LINK
-            </button>
-            <button onClick={() => { if (!navigator.requestMIDIAccess) return; setMidiEnabled(v => !v) }}
-              title={!navigator.requestMIDIAccess ? 'MIDI not supported in this browser' : midiEnabled ? `MIDI: ${midiInputName || 'waiting...'}` : 'Enable MIDI input'}
-              style={{
-                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: midiEnabled ? (midiInputName ? 'rgba(16,185,129,0.7)' : 'rgba(245,158,11,0.5)') : 'var(--bg-hover)',
-                color: midiEnabled ? '#fff' : 'var(--text-40)',
-                letterSpacing: '0.15em',
-                opacity: navigator.requestMIDIAccess ? 1 : 0.35,
-              }}>
-              🎹 MIDI
-            </button>
-            <button onClick={togglePaulMode}
-              style={{
-                ...miniBtn, padding: '3px 9px', width: 'auto', fontSize: 'var(--fs-sm)',
-                background: paulMode ? 'rgba(167,139,250,0.7)' : 'var(--bg-hover)',
-                color: paulMode ? '#fff' : 'var(--text-40)',
-                letterSpacing: '0.15em',
-              }}
-              title="Toggle Paul Mode (long grains, slow rate)">
-              ∿ PAUL
-            </button>
             <button onClick={toggleDrone} disabled={!droneReady}
+              aria-label={playing ? 'Stop drone' : 'Play drone'}
               title={hasSample ? 'Toggle sample drone' : 'Load a sample first to enable drone'}
               style={{
                 ...miniBtn, padding: '3px 12px', width: 'auto', fontSize: 'var(--fs-base)',
@@ -1936,10 +1933,11 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 color: playing ? '#000' : 'var(--text-40)',
                 opacity: droneReady ? 1 : 0.35, fontWeight: 900,
               }}>
-              {playing ? '⏹ DRONE' : '▶ DRONE'}
+              {playing ? '⏹' : '▶'}
             </button>
-            <button onClick={recStatus === 'saving' ? undefined : isRecording ? stopRecording : startRecording}
-              title={isRecording ? `Gravando… ${Math.floor(recElapsed / 60)}:${String(recElapsed % 60).padStart(2, '0')} — clique para parar e salvar MP3` : recStatus === 'saving' ? 'Convertendo para MP3…' : recStatus === 'saved' ? 'Salvo nos assets!' : 'Gravar em MP3'}
+            <button ref={recTimerTitleRef} onClick={recStatus === 'saving' ? undefined : isRecording ? stopRecording : startRecording}
+              aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+              title={isRecording ? 'Recording — click to stop' : recStatus === 'saving' ? 'Converting to MP3…' : recStatus === 'saved' ? 'Saved!' : isBackendOnline() ? 'Record to MP3' : 'Record to WebM (backend offline)'}
               style={{
                 ...miniBtn, padding: '3px 10px', width: 'auto', fontSize: 'var(--fs-sm)',
                 background: recStatus === 'saved' ? 'rgba(0,184,96,0.25)' : recStatus === 'saving' ? 'rgba(255,165,0,0.25)' : isRecording ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.15)',
@@ -1948,11 +1946,12 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                 animation: isRecording ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
                 cursor: recStatus === 'saving' ? 'wait' : 'pointer',
               }}>
-              {recStatus === 'saving' ? '⏳ MP3…' : recStatus === 'saved' ? '✓ SAVED' : isRecording ? `⏹ ${Math.floor(recElapsed / 60)}:${String(recElapsed % 60).padStart(2, '0')}` : '⏺ REC'}
+              <span ref={recTimerSpanRef}>{recStatus === 'saving' ? '⏳ MP3…' : recStatus === 'saved' ? '✓ SAVED' : isRecording ? '⏹ 0:00' : '⏺ REC'}</span>
             </button>
             {lastRecPath && !isRecording && recStatus !== 'saving' && (
               <button
                 onClick={e => { e.stopPropagation(); loadFromUrl(resolveUrl(`/api/preview?path=${encodeURIComponent(lastRecPath)}`), lastRecPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'rec') }}
+                aria-label="Load last recording"
                 title={`Load last rec: ${lastRecPath}`}
                 style={{
                   ...miniBtn, padding: '3px 6px', fontSize: 'var(--fs-xs)',
@@ -1960,6 +1959,34 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                   fontWeight: 800, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>♪ LAST</button>
             )}
+
+            {/* Tools dropdown */}
+            <button ref={toolsBtnRef} onClick={() => setShowTools(v => !v)}
+              aria-label="Tools menu" aria-expanded={showTools}
+              title="MIDI, Link, Paul mode, Undo/Redo"
+              style={{
+                ...miniBtn, padding: '3px 8px', width: 'auto', fontSize: 'var(--fs-sm)',
+                background: showTools ? 'rgba(255,255,255,0.14)' : toolsActive ? 'rgba(99,102,241,0.2)' : 'var(--bg-hover)',
+                color: showTools ? '#fff' : toolsActive ? '#a5b4fc' : 'var(--text-40)',
+                letterSpacing: '0.1em', gap: 3,
+              }}>
+              ⚙{toolsActive && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#a5b4fc', flexShrink: 0 }} />}
+            </button>
+
+            {/* Advanced mode toggle */}
+            <button onClick={() => setAdvancedMode(v => !v)}
+              aria-label={advancedMode ? 'Switch to simple mode' : 'Switch to advanced mode'}
+              aria-pressed={advancedMode}
+              title={advancedMode ? 'Hide advanced controls' : 'Show ADSR, Filter Env, LFO, Sequencer, Synth Type'}
+              style={{
+                ...miniBtn, padding: '3px 8px', width: 'auto', fontSize: 9,
+                background: advancedMode ? 'rgba(99,102,241,0.3)' : 'var(--bg-hover)',
+                color: advancedMode ? '#c7d2fe' : 'var(--text-30)',
+                letterSpacing: '0.1em',
+                border: advancedMode ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
+              }}>
+              {advancedMode ? '▴ SIMPLE' : '▾ ADV'}
+            </button>
           </div>
         </PanelHeader>
 
@@ -1967,8 +1994,8 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
         <Scope analyser={engineRef.current?.chain.analyser ?? null}
           fftAnalyser={engineRef.current?.fftAnalyser ?? null}
           color={accent} height={84}
-          mode={scopeMode} onToggleMode={() => setScopeMode(m => m === 'wave' ? 'fft' : 'wave')}
-          voiceCount={activeNotes.size} cpuLatency={cpuLatency} />
+          mode={scopeMode} onToggleMode={handleScopeToggle}
+          activeNotesRef={activeNotesRef} />
 
         {/* Status / src strip */}
         <div style={{
@@ -2001,12 +2028,32 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
               if (p) applyPitchAndSpeed(p, getPlayerDetune(p), analogModeRef.current, fxRef.current.rate * next, fxRef.current.paul)
             }}
             className="synth-vel-btn"
+            aria-label={`Sample speed ${sampleSpeed}x`}
+            title="Cycle sample speed"
             style={{
               padding: '2px 6px', border: 'none', borderRadius: 4, cursor: 'pointer',
               background: 'var(--bg-active)', color: '#fff',
               fontSize: 'var(--fs-xs)', fontWeight: 800, fontFamily: 'monospace',
               flexShrink: 0, transition: 'transform 0.1s, background 0.15s',
             }}>{sampleSpeed}x</button>
+        </div>
+
+        {/* Source row */}
+        <div style={{ display: 'flex', gap: 5 }}>
+          <input value={urlInput} onChange={e => setUrlInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleUrlLoad()}
+            onClick={e => e.stopPropagation()}
+            aria-label="Audio source URL"
+            placeholder="URL, YouTube link, or server path…"
+            style={inp} />
+          <button onClick={handleUrlLoad} disabled={!urlInput.trim() || status === 'loading'}
+            aria-label="Load URL" style={actionBtn}>↵</button>
+          <button onClick={() => fileRef.current?.click()} disabled={status === 'loading'}
+            style={actionBtn} title="Pick file" aria-label="Pick file">📁</button>
+          <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff,.webm"
+            aria-label="Upload audio file"
+            style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
         </div>
 
         {/* Trim slider */}
@@ -2017,274 +2064,264 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
           onChange={(s, e) => applyTrim(s, e)}
         />}
 
-        {/* Source row */}
-        <div style={{ display: 'flex', gap: 5 }}>
-          <input value={urlInput} onChange={e => setUrlInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleUrlLoad()}
-            onClick={e => e.stopPropagation()}
-            placeholder="URL, YouTube link, or server path…"
-            style={inp} />
-          <button onClick={handleUrlLoad} disabled={!urlInput.trim() || status === 'loading'}
-            style={actionBtn}>↵</button>
-          <button onClick={() => fileRef.current?.click()} disabled={status === 'loading'}
-            style={actionBtn} title="Pick file" aria-label="Pick file">📁</button>
-          <input ref={fileRef} type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aif,.aiff,.webm"
-            style={{ display: 'none' }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
-        </div>
-
-        {/* Panel-specific knobs: PAUL + RATE */}
-        <div style={{
-          display: 'flex', justifyContent: 'center', gap: 24,
-          padding: '10px 8px 4px',
-        }}>
-          <SynthKnob label="PAUL" value={fx.paul} min={0.05} max={1.5} accent="#a78bfa"
-            fmt={v => `${v.toFixed(2)}s`} onChange={v => updateFx({ paul: v })}
-            genActive={genEnabled.has('paul')} onRightClick={() => toggleGen('paul')} />
-          <SynthKnob label="RATE" value={fx.rate} min={0.05} max={2} accent="#a78bfa" log
-            fmt={v => `${v.toFixed(2)}×`} onChange={v => updateFx({ rate: v })}
-            genActive={genEnabled.has('rate')} onRightClick={() => toggleGen('rate')} />
-        </div>
-
-        {/* ADSR Envelope */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-          padding: '6px 8px 2px',
-        }}>
-          <ADSRDisplay
-            attack={fx.envAttack} decay={fx.envDecay}
-            sustain={fx.envSustain} release={fx.envRelease}
-            accent={accent} width={120} height={36}
-          />
-          <SynthKnob label="ATK" value={fx.envAttack} min={0.001} max={2} size={48} accent={accent} log
-            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ envAttack: v })} />
-          <SynthKnob label="DEC" value={fx.envDecay} min={0.01} max={2} size={48} accent={accent} log
-            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ envDecay: v })} />
-          <SynthKnob label="SUS" value={fx.envSustain} min={0} max={1} size={48} accent={accent}
-            fmt={v => `${(v * 100).toFixed(0)}%`}
-            onChange={v => updateFx({ envSustain: v })} />
-          <SynthKnob label="REL" value={fx.envRelease} min={0.01} max={5} size={48} accent={accent} log
-            fmt={v => v < 1 ? `${(v * 1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ envRelease: v })} />
-        </div>
-
-        {/* Synth type selector */}
-        <div style={{
-          display: 'flex', justifyContent: 'center', gap: 4, padding: '2px 8px',
-        }}>
-          {([
-            ['fm', 'FM'], ['am', 'AM'], ['sine', 'SIN'], ['square', 'SQR'], ['sawtooth', 'SAW'], ['triangle', 'TRI'],
-          ] as const).map(([val, label]) => (
-            <button key={val} onClick={() => { setSynthType(val as typeof synthType); rebuildPolySynth(val as typeof synthType) }}
-              style={{
-                ...miniBtn, padding: '2px 8px', fontSize: 9, letterSpacing: '0.12em',
-                background: synthType === val ? 'rgba(99,102,241,0.35)' : 'var(--bg-hover)',
-                color: synthType === val ? '#c7d2fe' : 'var(--text-40)',
-                border: synthType === val ? '1px solid rgba(99,102,241,0.5)' : '1px solid transparent',
-                transition: 'all 0.15s',
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Shared FX rack */}
+        {/* ── EFFECTS ── */}
         <EffectsRack
           params={fx}
           onChange={updateFx}
           accent={accent}
+          compact={!advancedMode}
           genEnabled={genEnabled as Set<keyof BaseFxParams>}
           onToggleGen={k => toggleGen(k as keyof FxParams)}
+          showSecondary={advancedMode}
         />
 
-        {/* Filter Envelope */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-          borderRadius: 8, background: 'rgba(6,182,212,0.04)',
-          border: '1px solid rgba(6,182,212,0.1)',
-          opacity: fx.fenvDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
-        }}>
-          <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#06b6d4', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>FENV</span>
-          <ADSRDisplay attack={fx.fenvAttack} decay={fx.fenvDecay} sustain={fx.fenvSustain} release={fx.fenvRelease} accent="#06b6d4" width={60} height={30} />
-          <SynthKnob label="ATK" value={fx.fenvAttack} min={0.001} max={2} size={42} accent="#06b6d4" log
-            fmt={v => v < 0.1 ? `${(v*1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ fenvAttack: v })} />
-          <SynthKnob label="DEC" value={fx.fenvDecay} min={0.01} max={2} size={42} accent="#06b6d4" log
-            fmt={v => v < 0.1 ? `${(v*1000).toFixed(0)}ms` : `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ fenvDecay: v })} />
-          <SynthKnob label="SUS" value={fx.fenvSustain} min={0} max={1} size={42} accent="#06b6d4"
-            fmt={v => `${Math.round(v*100)}%`}
-            onChange={v => updateFx({ fenvSustain: v })} />
-          <SynthKnob label="REL" value={fx.fenvRelease} min={0.01} max={5} size={42} accent="#06b6d4" log
-            fmt={v => `${v.toFixed(2)}s`}
-            onChange={v => updateFx({ fenvRelease: v })} />
-          <SynthKnob label="DEPTH" value={fx.fenvDepth} min={0} max={1} size={42} accent="#06b6d4"
-            fmt={v => `${Math.round(v*100)}%`}
-            onChange={v => updateFx({ fenvDepth: v })} />
-        </div>
-
-        {/* LFO */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-          borderRadius: 8, background: 'rgba(236,72,153,0.04)',
-          border: '1px solid rgba(236,72,153,0.1)',
-          opacity: fx.lfoDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
-        }}>
-          <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#ec4899', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>LFO</span>
-          <SynthKnob label="RATE" value={fx.lfoRate} min={0.05} max={20} size={42} accent="#ec4899" log
-            fmt={v => `${v.toFixed(1)}Hz`}
-            onChange={v => updateFx({ lfoRate: v })} />
-          <SynthKnob label="DEPTH" value={fx.lfoDepth} min={0} max={1} size={42} accent="#ec4899"
-            fmt={v => `${Math.round(v*100)}%`}
-            onChange={v => updateFx({ lfoDepth: v })} />
-          <div style={{ display: 'flex', gap: 2 }}>
-            {(['sine', 'triangle', 'sawtooth', 'square'] as LFOWave[]).map(w => (
-              <button key={w} onClick={() => updateFx({ lfoWave: w })}
-                style={{
-                  ...miniBtn, padding: '2px 5px', width: 'auto', fontSize: 'var(--fs-2xs)',
-                  background: fx.lfoWave === w ? 'rgba(236,72,153,0.6)' : 'var(--bg-hover)',
-                  color: fx.lfoWave === w ? '#fff' : 'var(--text-30)',
-                }}>{w === 'sine' ? 'SIN' : w === 'triangle' ? 'TRI' : w === 'sawtooth' ? 'SAW' : 'SQR'}</button>
-            ))}
+        {advancedMode && <>
+          {/* ── OSCILLATOR ── */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(99,102,241,0.03)', border: '1px solid rgba(99,102,241,0.08)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={sectionLabel}>OSC</span>
+              <div role="radiogroup" aria-label="Synth oscillator type" style={{ display: 'flex', gap: 3 }}>
+                {([
+                  ['fm', 'FM'], ['am', 'AM'], ['sine', 'SIN'], ['square', 'SQR'], ['sawtooth', 'SAW'], ['triangle', 'TRI'],
+                ] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => { setSynthType(val as typeof synthType); rebuildPolySynth(val as typeof synthType) }}
+                    role="radio" aria-checked={synthType === val} aria-label={`${label} oscillator`}
+                    style={{
+                      ...miniBtn, padding: '2px 8px', fontSize: 9, letterSpacing: '0.12em',
+                      background: synthType === val ? 'rgba(99,102,241,0.35)' : 'var(--bg-hover)',
+                      color: synthType === val ? '#c7d2fe' : 'var(--text-40)',
+                      border: synthType === val ? '1px solid rgba(99,102,241,0.5)' : '1px solid transparent',
+                    }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* ADSR Envelope */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+              <ADSRDisplay
+                attack={fx.envAttack} decay={fx.envDecay}
+                sustain={fx.envSustain} release={fx.envRelease}
+                accent={accent} width={120} height={36}
+              />
+              <SynthKnob label="ATK" value={fx.envAttack} min={0.001} max={2} size={48} accent={accent} log
+                fmt={fmtTime2} onChange={onEnvAttackChange} />
+              <SynthKnob label="DEC" value={fx.envDecay} min={0.01} max={2} size={48} accent={accent} log
+                fmt={fmtTime2} onChange={onEnvDecayChange} />
+              <SynthKnob label="SUS" value={fx.envSustain} min={0} max={1} size={48} accent={accent}
+                fmt={fmtPct} onChange={onEnvSustainChange} />
+              <SynthKnob label="REL" value={fx.envRelease} min={0.01} max={5} size={48} accent={accent} log
+                fmt={fmtTime2} onChange={onEnvReleaseChange} />
+            </div>
           </div>
-          <select value={fx.lfoTarget} onChange={e => updateFx({ lfoTarget: e.target.value })}
-            style={{
-              padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(236,72,153,0.2)',
-              background: 'var(--bg-input)', color: 'var(--text-70)', fontSize: 'var(--fs-2xs)',
-              cursor: 'pointer',
-            }}>
-            {LFO_TARGETS.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </div>
 
-        {/* Sequencer bar */}
-        <div style={{
-          display: 'flex', flexDirection: 'column', gap: 5,
-          padding: '7px 10px', borderRadius: 8,
-          background: totalSteps > 0
-            ? 'linear-gradient(90deg,rgba(167,139,250,0.08),rgba(167,139,250,0.02))'
-            : 'rgba(255,255,255,0.02)',
-          border: `1px solid ${totalSteps > 0 ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.04)'}`,
-        }}>
-          {/* Row 1: Loop slots + play + clear */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <button onClick={seqPlaying ? stopSeq : startSeq}
-              disabled={!hasAnyContent}
-              aria-label={seqPlaying ? "Stop sequencer" : "Play sequencer"}
-              style={{
-                ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
-                background: seqPlaying ? LOOP_COLORS[activeLoopIdx] : hasAnyContent ? 'rgba(167,139,250,0.25)' : 'var(--bg-hover)',
-                color: seqPlaying ? '#000' : hasAnyContent ? '#a78bfa' : 'var(--text-20)',
-                opacity: !hasAnyContent ? 0.4 : 1, fontWeight: 900,
-              }}>
-              {seqPlaying ? '⏹' : '▶'}
-            </button>
-            <button onClick={freestyleRec ? stopFreestyleRec : startFreestyleRec}
-              title={freestyleRec ? 'Stop recording freestyle loop — play notes now!' : `Record freestyle loop into ${String.fromCharCode(65 + activeLoopIdx)}`}
-              aria-label={freestyleRec ? "Stop recording" : "Record freestyle"}
-              style={{
-                ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
-                background: freestyleRec ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.12)',
-                color: freestyleRec ? '#fff' : 'rgba(239,68,68,0.6)',
-                fontWeight: 900,
-                animation: freestyleRec ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
-              }}>
-              {freestyleRec ? '⏹ REC' : '⏺'}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', flex: 1 }}>
-              {loops.map((loop, i) => {
-                const color = LOOP_COLORS[i % LOOP_COLORS.length]
-                const isActive = i === activeLoopIdx
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <button
-                      onClick={() => setActiveLoopIdx(i)}
-                      onContextMenu={e => { e.preventDefault(); toggleMuteLoop(i) }}
-                      title={`Loop ${String.fromCharCode(65 + i)} — ${loop.steps.length} steps${loop.freestyle?.length ? ` + ${loop.freestyle.length} freestyle` : ''}${loop.muted ? ' (muted)' : ''} · right-click: mute`}
-                      style={{
-                        ...miniBtn, padding: '2px 6px', width: 'auto', fontSize: 'var(--fs-2xs)',
-                        background: isActive ? color : loop.muted ? 'rgba(255,255,255,0.03)' : `${color}22`,
-                        color: isActive ? '#000' : loop.muted ? 'var(--text-20)' : color,
-                        opacity: loop.muted ? 0.4 : 1,
-                        border: isActive ? `1px solid ${color}` : '1px solid transparent',
-                        fontWeight: 900,
-                        textDecoration: loop.muted ? 'line-through' : 'none',
-                      }}>
-                      {String.fromCharCode(65 + i)}{loop.steps.length > 0 ? `·${loop.steps.length}` : ''}{loop.freestyle?.length ? '♫' : ''}
-                    </button>
-                    {loops.length > 1 && isActive && (
-                      <button onClick={() => removeLoop(i)} title="Remove" aria-label="Remove loop"
-                        style={{ ...miniBtn, width: 14, height: 14, padding: 0, fontSize: 8, color: 'rgba(239,68,68,0.6)' }}>✕</button>
-                    )}
-                  </div>
-                )
-              })}
-              {loops.length < LOOP_COLORS.length && (
-                <button onClick={addLoop} title="Add loop" aria-label="Add loop"
-                  style={{ ...miniBtn, width: 18, height: 18, padding: 0, fontSize: 'var(--fs-2xs)', color: 'var(--text-20)' }}>+</button>
+          {/* ── SAMPLE / GRANULAR ── */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 8,
+            padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(167,139,250,0.03)', border: '1px solid rgba(167,139,250,0.08)',
+          }}>
+            <span style={sectionLabel}>GRANULAR</span>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 24 }}>
+              <SynthKnob label="PAUL" value={fx.paul} min={0.05} max={1.5} accent="#a78bfa"
+                fmt={fmtPaul} onChange={onPaulChange}
+                genActive={genEnabled.has('paul')} onRightClick={toggleGenPaul} />
+              <SynthKnob label="RATE" value={fx.rate} min={0.05} max={2} accent="#a78bfa" log
+                fmt={fmtRate} onChange={onRateChange}
+                genActive={genEnabled.has('rate')} onRightClick={toggleGenRate} />
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <VintageToggle
+                  value={analogMode}
+                  onChange={v => {
+                    setAnalogMode(v);
+                    const e = engineRef.current;
+                    if (e?.player) {
+                      applyPitchAndSpeed(e.player, getPlayerDetune(e.player), v, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ── MODULATION ── */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 6,
+            padding: '8px 10px', borderRadius: 8,
+            background: 'rgba(6,182,212,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+          }}>
+            <span style={sectionLabel}>MODULATION</span>
+            {/* Filter Envelope */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
+              borderRadius: 6, background: 'rgba(6,182,212,0.04)',
+              opacity: fx.fenvDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
+            }}>
+              <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#06b6d4', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>FENV</span>
+              <ADSRDisplay attack={fx.fenvAttack} decay={fx.fenvDecay} sustain={fx.fenvSustain} release={fx.fenvRelease} accent="#06b6d4" width={60} height={30} />
+              <SynthKnob label="ATK" value={fx.fenvAttack} min={0.001} max={2} size={42} accent="#06b6d4" log
+                fmt={fmtTime2} onChange={onFenvAttackChange} />
+              <SynthKnob label="DEC" value={fx.fenvDecay} min={0.01} max={2} size={42} accent="#06b6d4" log
+                fmt={fmtTime2} onChange={onFenvDecayChange} />
+              <SynthKnob label="SUS" value={fx.fenvSustain} min={0} max={1} size={42} accent="#06b6d4"
+                fmt={fmtPct} onChange={onFenvSustainChange} />
+              <SynthKnob label="REL" value={fx.fenvRelease} min={0.01} max={5} size={42} accent="#06b6d4" log
+                fmt={fmtSec} onChange={onFenvReleaseChange} />
+              <SynthKnob label="DEPTH" value={fx.fenvDepth} min={0} max={1} size={42} accent="#06b6d4"
+                fmt={fmtPct} onChange={onFenvDepthChange} />
+            </div>
+            {/* LFO */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
+              borderRadius: 6, background: 'rgba(236,72,153,0.04)',
+              opacity: fx.lfoDepth > 0 ? 1 : 0.5, transition: 'opacity 0.2s',
+            }}>
+              <span style={{ fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.15em', color: '#ec4899', writingMode: 'vertical-rl', textOrientation: 'mixed' }}>LFO</span>
+              <SynthKnob label="RATE" value={fx.lfoRate} min={0.05} max={20} size={42} accent="#ec4899" log
+                fmt={fmtHz} onChange={onLfoRateChange} />
+              <SynthKnob label="DEPTH" value={fx.lfoDepth} min={0} max={1} size={42} accent="#ec4899"
+                fmt={fmtPct} onChange={onLfoDepthChange} />
+              <div role="radiogroup" aria-label="LFO waveform" style={{ display: 'flex', gap: 2 }}>
+                {(['sine', 'triangle', 'sawtooth', 'square'] as LFOWave[]).map(w => (
+                  <button key={w} onClick={() => onLfoWaveChange(w)}
+                    role="radio" aria-checked={fx.lfoWave === w} aria-label={`${w} LFO wave`}
+                    style={{
+                      ...miniBtn, padding: '2px 5px', width: 'auto', fontSize: 'var(--fs-2xs)',
+                      background: fx.lfoWave === w ? 'rgba(236,72,153,0.6)' : 'var(--bg-hover)',
+                      color: fx.lfoWave === w ? '#fff' : 'var(--text-30)',
+                    }}>{w === 'sine' ? 'SIN' : w === 'triangle' ? 'TRI' : w === 'sawtooth' ? 'SAW' : 'SQR'}</button>
+                ))}
+              </div>
+              <select value={fx.lfoTarget} aria-label="LFO target" onChange={e => onLfoTargetChange(e.target.value)}
+                style={{
+                  padding: '2px 4px', borderRadius: 4, border: '1px solid rgba(236,72,153,0.2)',
+                  background: 'var(--bg-input)', color: 'var(--text-70)', fontSize: 'var(--fs-2xs)',
+                  cursor: 'pointer',
+                }}>
+                {LFO_TARGETS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* ── SEQUENCER ── */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 5,
+            padding: '7px 10px', borderRadius: 8,
+            background: totalSteps > 0
+              ? 'linear-gradient(90deg,rgba(167,139,250,0.08),rgba(167,139,250,0.02))'
+              : 'rgba(255,255,255,0.02)',
+            border: `1px solid ${totalSteps > 0 ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.04)'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={sectionLabel}>SEQ</span>
+              <button onClick={seqPlaying ? stopSeq : startSeq}
+                disabled={!hasAnyContent}
+                aria-label={seqPlaying ? "Stop sequencer" : "Play sequencer"}
+                style={{
+                  ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
+                  background: seqPlaying ? LOOP_COLORS[activeLoopIdx] : hasAnyContent ? 'rgba(167,139,250,0.25)' : 'var(--bg-hover)',
+                  color: seqPlaying ? '#000' : hasAnyContent ? '#a78bfa' : 'var(--text-20)',
+                  opacity: !hasAnyContent ? 0.4 : 1, fontWeight: 900,
+                }}>
+                {seqPlaying ? '⏹' : '▶'}
+              </button>
+              <button onClick={freestyleRec ? stopFreestyleRec : startFreestyleRec}
+                title={freestyleRec ? 'Stop recording freestyle loop — play notes now!' : `Record freestyle loop into ${String.fromCharCode(65 + activeLoopIdx)}`}
+                aria-label={freestyleRec ? "Stop recording" : "Record freestyle"}
+                style={{
+                  ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
+                  background: freestyleRec ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.12)',
+                  color: freestyleRec ? '#fff' : 'rgba(239,68,68,0.6)',
+                  fontWeight: 900,
+                  animation: freestyleRec ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
+                }}>
+                {freestyleRec ? '⏹ REC' : '⏺'}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', flex: 1 }}>
+                {loops.map((loop, i) => {
+                  const color = LOOP_COLORS[i % LOOP_COLORS.length]
+                  const isActive = i === activeLoopIdx
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <button
+                        onClick={() => setActiveLoopIdx(i)}
+                        onContextMenu={e => { e.preventDefault(); toggleMuteLoop(i) }}
+                        title={`Loop ${String.fromCharCode(65 + i)} — ${loop.steps.length} steps${loop.freestyle?.length ? ` + ${loop.freestyle.length} freestyle` : ''}${loop.muted ? ' (muted)' : ''} · right-click: mute`}
+                        style={{
+                          ...miniBtn, padding: '2px 6px', width: 'auto', fontSize: 'var(--fs-2xs)',
+                          background: isActive ? color : loop.muted ? 'rgba(255,255,255,0.03)' : `${color}22`,
+                          color: isActive ? '#000' : loop.muted ? 'var(--text-20)' : color,
+                          opacity: loop.muted ? 0.4 : 1,
+                          border: isActive ? `1px solid ${color}` : '1px solid transparent',
+                          fontWeight: 900,
+                          textDecoration: loop.muted ? 'line-through' : 'none',
+                        }}>
+                        {String.fromCharCode(65 + i)}{loop.steps.length > 0 ? `·${loop.steps.length}` : ''}{loop.freestyle?.length ? '♫' : ''}
+                      </button>
+                      {loops.length > 1 && isActive && (
+                        <button onClick={() => removeLoop(i)} title="Remove" aria-label="Remove loop"
+                          style={{ ...miniBtn, width: 14, height: 14, padding: 0, fontSize: 8, color: 'rgba(239,68,68,0.6)' }}>✕</button>
+                      )}
+                    </div>
+                  )
+                })}
+                {loops.length < LOOP_COLORS.length && (
+                  <button onClick={addLoop} title="Add loop" aria-label="Add loop"
+                    style={{ ...miniBtn, width: 18, height: 18, padding: 0, fontSize: 'var(--fs-2xs)', color: 'var(--text-20)' }}>+</button>
+                )}
+              </div>
+              <span style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: freestyleRec ? 'rgba(239,68,68,0.8)' : 'var(--text-20)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {freestyleRec ? 'playing…' : !hasAnyContent ? 'right-click keys / ⏺ freestyle' : `${totalSteps} steps`}
+              </span>
+              {activeSequence.length > 0 && (
+                <button onClick={clearActiveLoop}
+                  title={`Clear loop ${String.fromCharCode(65 + activeLoopIdx)}`}
+                  style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.7)' }}>
+                  clr
+                </button>
+              )}
+              {totalSteps > 0 && loops.length > 1 && (
+                <button onClick={clearAllLoops} title="Clear all"
+                  style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.5)' }}>
+                  all
+                </button>
               )}
             </div>
-            <span style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: freestyleRec ? 'rgba(239,68,68,0.8)' : 'var(--text-20)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-              {freestyleRec ? 'playing…' : !hasAnyContent ? 'right-click keys / ⏺ freestyle' : `${totalSteps} steps`}
-            </span>
-            {activeSequence.length > 0 && (
-              <button onClick={clearActiveLoop}
-                title={`Clear loop ${String.fromCharCode(65 + activeLoopIdx)}`}
-                style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.7)' }}>
-                clr
-              </button>
-            )}
-            {totalSteps > 0 && loops.length > 1 && (
-              <button onClick={clearAllLoops} title="Clear all"
-                style={{ ...miniBtn, width: 'auto', padding: '2px 6px', fontSize: 'var(--fs-2xs)', color: 'rgba(239,68,68,0.5)' }}>
-                all
-              </button>
-            )}
-          </div>
-          {/* Row 2: BPM + Gate */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <BpmControl bpm={seqBpm} onChange={setSeqBpm} min={1} max={180} accent="#a78bfa" showSlider />
-            {harmonyInfo && _synthBpmRegistry.size > 1 && (
-              <span title={harmonyInfo.harmonic ? `Harmônico ${harmonyInfo.ratio} com ${harmonyInfo.otherBpm} BPM` : `Fora de sincronia com ${harmonyInfo.otherBpm} BPM`}
-                style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: harmonyInfo.harmonic ? '#34d399' : 'rgba(239,68,68,0.5)', flexShrink: 0, cursor: 'default' }}>
-                {harmonyInfo.harmonic ? `♪ ${harmonyInfo.ratio}` : '⚠'}
+            {/* Row 2: BPM + Gate */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <BpmControl bpm={seqBpm} onChange={setSeqBpm} min={1} max={180} accent="#a78bfa" showSlider />
+              {harmonyInfo && _synthBpmRegistry.size > 1 && (
+                <span title={harmonyInfo.harmonic ? `Harmônico ${harmonyInfo.ratio} com ${harmonyInfo.otherBpm} BPM` : `Fora de sincronia com ${harmonyInfo.otherBpm} BPM`}
+                  style={{ fontSize: 'var(--fs-2xs)', fontFamily: 'monospace', color: harmonyInfo.harmonic ? '#34d399' : 'rgba(239,68,68,0.5)', flexShrink: 0, cursor: 'default' }}>
+                  {harmonyInfo.harmonic ? `♪ ${harmonyInfo.ratio}` : '⚠'}
+                </span>
+              )}
+              <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
+                gate {seqGate < 1 ? `${Math.round(seqGate * 100)}%` : seqGate === 1 ? 'tie' : `${seqGate.toFixed(1)}×`}
               </span>
-            )}
-            <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
-              gate {seqGate < 1 ? `${Math.round(seqGate * 100)}%` : seqGate === 1 ? 'tie' : `${seqGate.toFixed(1)}×`}
-            </span>
-            <input type="range" min={0.05} max={1.5} step={0.01} value={seqGate}
-              onChange={e => {
-                const v = Number(e.target.value)
-                setSeqGate(Math.abs(v - 1) < 0.04 ? 1 : v)
-              }}
-              style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 50 }}
-              title="Gate: <1 silent gap · 1 tie · >1 legato overlap" />
-
-            <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
-              swing {seqSwing === 0 ? 'off' : `${Math.round(seqSwing * 100)}%`}
-            </span>
-            <input type="range" min={0} max={0.9} step={0.01} value={seqSwing}
-              onChange={e => setSeqSwing(Number(e.target.value))}
-              style={{ width: 50, accentColor: '#f59e0b', cursor: 'pointer', flexShrink: 0 }}
-              title="Swing: shuffle timing of off-beat steps" />
-
-            <div style={{ paddingLeft: 10, paddingRight: 6, borderLeft: '1px solid rgba(255,255,255,0.08)' }}>
-              <VintageToggle 
-                value={analogMode} 
-                onChange={v => {
-                  setAnalogMode(v);
-                  const e = engineRef.current;
-                  if (e?.player) {
-                    applyPitchAndSpeed(e.player, getPlayerDetune(e.player), v, fxRef.current.rate * sampleSpeedRef.current, fxRef.current.paul)
-                  }
-                }} 
-              />
+              <input type="range" min={0.05} max={1.5} step={0.01} value={seqGate}
+                aria-label="Gate amount"
+                onChange={e => {
+                  const v = Number(e.target.value)
+                  setSeqGate(Math.abs(v - 1) < 0.04 ? 1 : v)
+                }}
+                style={{ flex: 1, accentColor: '#34d399', cursor: 'pointer', minWidth: 50 }}
+                title="Gate: <1 silent gap · 1 tie · >1 legato overlap" />
+              <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-30)', fontFamily: 'monospace', flexShrink: 0 }}>
+                swing {seqSwing === 0 ? 'off' : `${Math.round(seqSwing * 100)}%`}
+              </span>
+              <input type="range" min={0} max={0.9} step={0.01} value={seqSwing}
+                aria-label="Swing amount"
+                onChange={e => setSeqSwing(Number(e.target.value))}
+                style={{ width: 50, accentColor: '#f59e0b', cursor: 'pointer', flexShrink: 0 }}
+                title="Swing: shuffle timing of off-beat steps" />
             </div>
           </div>
-        </div>
+        </>}
 
         {/* Octave badge + Piano */}
         <div style={{ position: 'relative' }}>
@@ -2301,18 +2338,26 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
           <Piano activeNotes={activeNotes}
             sequence={activeSequence} seqStep={seqSteps[activeLoopIdx] ?? -1} seqPlaying={seqPlaying}
             seqColor={LOOP_COLORS[activeLoopIdx % LOOP_COLORS.length]}
-            onNoteOn={(name, cents) => {
-              const t = transposeNote(name, octaveShift)
-              noteOn(t.name, t.cents)
-            }}
-            onNoteOff={(name) => {
-              const t = transposeNote(name, octaveShift)
-              noteOff(t.name)
-            }}
+            onNoteOn={handlePianoNoteOn}
+            onNoteOff={handlePianoNoteOff}
             onToggleSeq={toggleInSequence} />
         </div>
       </div>
     </Rnd>
+    {showTools && createPortal(
+      <ToolsDropdown
+        anchorRef={toolsBtnRef}
+        menuRef={toolsMenuRef}
+        midiEnabled={midiEnabled} setMidiEnabled={setMidiEnabled}
+        midiInputName={midiInputName}
+        noteBusLinked={noteBusLinked} setNoteBusLinked={setNoteBusLinked}
+        paulMode={paulMode} togglePaulMode={togglePaulMode}
+        fxHistoryIdx={fxHistoryIdx} fxHistoryLen={fxHistory.length}
+        undoFx={undoFx} redoFx={redoFx}
+        onClose={() => setShowTools(false)}
+      />,
+      document.body,
+    )}
     {showPresets && createPortal(
       <PresetMenu
         factory={FACTORY_PRESETS}
@@ -2331,12 +2376,16 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     <style>{`
       @keyframes sb-pulse { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
       .synth-vel-btn:active { transform: scale(0.88) !important; background: rgba(255,255,255,0.16) !important; }
-    `}</style>
+    `}
+    {`
+      .synth-tools-menu .tools-item:hover:not(:disabled) { background: rgba(255,255,255,0.06) !important; }
+    `}
+    </style>
     </CaptureIdContext.Provider>
   )
 }
 
-function MiniSlider({ label, value, min, max, step, fmt, onChange }: {
+const MiniSlider = React.memo(function MiniSlider({ label, value, min, max, step, fmt, onChange }: {
   label: string; value: number; min: number; max: number; step: number
   fmt: (v: number) => string; onChange: (v: number) => void
 }) {
@@ -2367,6 +2416,80 @@ function MiniSlider({ label, value, min, max, step, fmt, onChange }: {
         style={{ width: '100%', accentColor: 'var(--status-ok)', cursor: 'pointer' }} />
     </div>
   )
+})
+
+const toolsMenuItem: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  padding: '6px 12px', border: 'none', background: 'none',
+  color: 'var(--text-70)', fontSize: 'var(--fs-sm)', fontWeight: 600,
+  cursor: 'pointer', textAlign: 'left', width: '100%',
+}
+
+function ToolsDropdown({ anchorRef, menuRef, midiEnabled, setMidiEnabled, midiInputName, noteBusLinked, setNoteBusLinked, paulMode, togglePaulMode, fxHistoryIdx, fxHistoryLen, undoFx, redoFx, onClose }: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>
+  menuRef: React.RefObject<HTMLDivElement | null>
+  midiEnabled: boolean; setMidiEnabled: React.Dispatch<React.SetStateAction<boolean>>
+  midiInputName: string
+  noteBusLinked: boolean; setNoteBusLinked: React.Dispatch<React.SetStateAction<boolean>>
+  paulMode: boolean; togglePaulMode: () => void
+  fxHistoryIdx: number; fxHistoryLen: number
+  undoFx: () => void; redoFx: () => void
+  onClose: () => void
+}) {
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  useEffect(() => {
+    const r = anchorRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 180) })
+  }, [anchorRef])
+
+  return (
+    <div ref={menuRef} className="synth-tools-menu" style={{
+      position: 'fixed', top: pos.top, left: pos.left,
+      minWidth: 180, padding: '6px 0', borderRadius: 8,
+      background: 'var(--bg-chassis)', border: '1px solid rgba(255,255,255,0.1)',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 99999,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <button onClick={() => { setMidiEnabled(v => !v); onClose() }}
+        disabled={!navigator.requestMIDIAccess}
+        className="tools-item"
+        style={{ ...toolsMenuItem, opacity: navigator.requestMIDIAccess ? 1 : 0.35 }}>
+        <span>🎹 MIDI</span>
+        {midiEnabled && <span style={{ color: '#34d399', fontSize: 'var(--fs-2xs)', fontWeight: 900 }}>{midiInputName || 'ON'}</span>}
+      </button>
+      <button onClick={() => { setNoteBusLinked(v => !v); onClose() }}
+        className="tools-item"
+        style={toolsMenuItem}>
+        <span>🔗 Link</span>
+        {noteBusLinked && <span style={{ color: '#06b6d4', fontSize: 'var(--fs-2xs)', fontWeight: 900 }}>ON</span>}
+      </button>
+      <button onClick={() => { togglePaulMode(); onClose() }}
+        className="tools-item"
+        style={toolsMenuItem}>
+        <span>∿ Paul Mode</span>
+        {paulMode && <span style={{ color: '#a78bfa', fontSize: 'var(--fs-2xs)', fontWeight: 900 }}>ON</span>}
+      </button>
+      <div style={{ height: 1, margin: '4px 8px', background: 'rgba(255,255,255,0.06)' }} />
+      <button onClick={() => { undoFx(); onClose() }} disabled={fxHistoryIdx <= 0}
+        className="tools-item"
+        style={{ ...toolsMenuItem, opacity: fxHistoryIdx <= 0 ? 0.35 : 1 }}>
+        <span>← Undo</span>
+        <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-20)' }}>Ctrl+Z</span>
+      </button>
+      <button onClick={() => { redoFx(); onClose() }} disabled={fxHistoryIdx >= fxHistoryLen - 1}
+        className="tools-item"
+        style={{ ...toolsMenuItem, opacity: fxHistoryIdx >= fxHistoryLen - 1 ? 0.35 : 1 }}>
+        <span>→ Redo</span>
+        <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-20)' }}>Ctrl+Shift+Z</span>
+      </button>
+    </div>
+  )
+}
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 'var(--fs-2xs)', fontWeight: 900, letterSpacing: '0.2em',
+  color: 'var(--text-20)', textTransform: 'uppercase',
+  padding: '0 2px',
 }
 
 const inp: React.CSSProperties = {
@@ -2387,7 +2510,7 @@ const miniBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
 
-function VintageToggle({ 
+const VintageToggle = React.memo(function VintageToggle({ 
   value, onChange 
 }: { 
   value: boolean; onChange: (v: boolean) => void 
@@ -2443,4 +2566,4 @@ function VintageToggle({
       </span>
     </div>
   )
-}
+})

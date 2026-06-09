@@ -66,6 +66,8 @@ import { loadGeo, saveGeo } from './lib/geo'
 
 import { closeBtnStyle } from './lib/styles'
 
+import { PanelHeader } from './lib/PanelHeader'
+
 import { PanelProvider, usePanelCtx } from './lib/panel-context'
 
 import { KeyTile } from './lib/KeyTile'
@@ -80,16 +82,19 @@ import './index.css'
 
 
 
-const KEYS = [
-
+const KEYS_H = [
   'key_f13','key_f14','key_f15',
-
   'key_f16','key_f17','key_f18',
-
   'key_f19','key_f20','key_f21',
-
   'key_f22','key_f23','key_f24',
+]
 
+// Rotated 90° CCW for vertical orientation (3cols×4rows)
+const KEYS_V = [
+  'key_f16','key_f20','key_f24',
+  'key_f15','key_f19','key_f23',
+  'key_f14','key_f18','key_f22',
+  'key_f13','key_f17','key_f21',
 ]
 
 
@@ -158,6 +163,8 @@ function AppInner() {
   const [online, setOnline] = useState(false)
 
   const [showKeys, setShowKeys] = useState(() => localStorage.getItem('panel-keys') !== 'false')
+
+  const [verticalKeys, setVerticalKeys] = useState(() => localStorage.getItem('keys-vertical') !== 'false')
 
   const [showMixer, setShowMixer] = useState(() => localStorage.getItem('panel-mixer') !== 'false')
 
@@ -336,6 +343,7 @@ function AppInner() {
   const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null)
 
   const [ctxSrc, setCtxSrc] = useState('')
+  const [ctxLabel, setCtxLabel] = useState('')
 
   const [ctxSaving, setCtxSaving] = useState(false)
 
@@ -366,6 +374,7 @@ function AppInner() {
   // Persist visibilidade â€” 1 useEffect por chave evita 11 setItem por toggle.
 
   useEffect(() => { localStorage.setItem('panel-keys', String(showKeys)) }, [showKeys])
+  useEffect(() => { localStorage.setItem('keys-vertical', String(verticalKeys)) }, [verticalKeys])
 
   useEffect(() => { localStorage.setItem('panel-mixer', String(showMixer)) }, [showMixer])
 
@@ -714,7 +723,7 @@ function AppInner() {
 
     const existing = config.buttons?.[key] || {}
 
-    const next = { ...config, buttons: { ...config.buttons, [key]: { ...existing, path: ctxSrc } } }
+    const next = { ...config, buttons: { ...config.buttons, [key]: { ...existing, path: ctxSrc, label: ctxLabel.trim() || ctxSrc.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || '' } } }
 
     try {
 
@@ -1046,30 +1055,41 @@ function AppInner() {
       if (canScrollInside(target, e.deltaY, e.deltaX)) return
 
       e.preventDefault()
+      e.stopPropagation()
 
       const { state } = transformRef.current
+      const { positionX, positionY, scale: currentScale } = state
 
       // Ctrl/Cmd+scroll = zoom toward mouse
       if (e.ctrlKey || e.metaKey) {
-        const rect = el.getBoundingClientRect()
-        const cursorX = e.clientX - rect.left
-        const cursorY = e.clientY - rect.top
-        const delta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 10)
-        const ZOOM_SENSITIVITY = 0.008
-        const factor = 1 - delta * ZOOM_SENSITIVITY
-        const clamped = Math.min(5, Math.max(0.05, state.scale * factor))
-        const ratio = clamped / state.scale
-        const newX = cursorX - ratio * (cursorX - state.positionX)
-        const newY = cursorY - ratio * (cursorY - state.positionY)
-        transformRef.current.setTransform(newX, newY, clamped, 0)
-        setScale(clamped)
+        cancelAnimationFrame(inertiaRef.current)
+        velRef.current = { x: 0, y: 0 }
+
+        const wrapper = el.querySelector('.react-transform-component') as HTMLElement
+        if (!wrapper) return
+        const contentRect = wrapper.getBoundingClientRect()
+        const mouseX = (e.clientX - contentRect.left) / currentScale
+        const mouseY = (e.clientY - contentRect.top) / currentScale
+
+        // Proportional zoom — multiply by a small factor instead of adding a fixed step
+        const direction = e.deltaY > 0 ? -1 : 1
+        const factor = 1 + direction * 0.06
+        const newScale = Math.min(5, Math.max(0.05, currentScale * factor))
+        if (newScale === currentScale) return
+
+        const scaleDiff = newScale - currentScale
+        const newX = positionX - mouseX * scaleDiff
+        const newY = positionY - mouseY * scaleDiff
+
+        transformRef.current.setTransform(newX, newY, newScale, 0)
+        setScale(newScale)
         return
       }
 
-      // Default: pan with inertia
+      // Scroll without modifier = pan with inertia
       cancelAnimationFrame(inertiaRef.current)
       const intensity = getScrollIntensity()
-      const zoomFactor = 1 / Math.max(0.3, state.scale)
+      const zoomFactor = 1 / Math.max(0.3, currentScale)
       const speed = 0.5 * intensity * zoomFactor
       const clamp = (v: number, max: number) => Math.max(-max, Math.min(max, v))
       const maxD = 25 + intensity * 15
@@ -1082,7 +1102,7 @@ function AppInner() {
         dx = -dX * speed; dy = -dY * speed
       }
       velRef.current = { x: dx * 0.4, y: dy * 0.4 }
-      transformRef.current.setTransform(state.positionX + dx, state.positionY + dy, state.scale, 0)
+      transformRef.current.setTransform(positionX + dx, positionY + dy, currentScale, 0)
       inertiaRef.current = requestAnimationFrame(tickInertia)
 
     }
@@ -1224,13 +1244,13 @@ function AppInner() {
 
             allowMiddleClickPan: true,
 
-            velocityDisabled: true,
+            velocityDisabled: false,
 
           }}
 
           wheel={{ disabled: true }}
 
-          pinch={{ disabled: true }}
+          pinch={{ disabled: false }}
 
         >
 
@@ -1409,64 +1429,37 @@ function AppInner() {
           >
 
             <div
-
-              className="drag-handle"
-
               style={{
-
                 borderRadius: 'var(--radius-panel)',
-
                 background: 'var(--bg-chassis)',
-
                 boxShadow: 'var(--shadow-chassis)',
-
-                padding: '24px',
-
-                cursor: 'grab',
-
-                userSelect: 'none',
-
+                display: 'flex',
+                flexDirection: 'column',
               }}
-
             >
 
-              {/* Knobs row */}
+              <PanelHeader title="Keyboard" onClose={() => setShowKeys(false)} className="drag-handle">
+                <button
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={() => setVerticalKeys(v => !v)}
+                  title={verticalKeys ? 'Horizontal layout' : 'Vertical layout'}
+                  style={{ ...closeBtnStyle, fontSize: 11, opacity: 0.7 }}
+                  aria-label="Toggle orientation"
+                >{verticalKeys ? '⇔' : '⇕'}</button>
+              </PanelHeader>
 
-              <div className="flex items-center justify-between mb-6 px-2">
+              <div style={{ padding: '16px 20px' }}>
 
+              <div className="flex items-center justify-between mb-4 px-2">
                 <AppKnob label="MASTER GAIN" size={96} />
-
-                <div className="flex flex-col gap-2 pt-2 items-center">
-
-                  <div className="w-2 h-2 rounded-full bg-[var(--status-err)] border border-white/5" />
-
-                  <div className="w-2 h-2 rounded-full bg-[#1a1c1e]" />
-
-                  <button
-
-                    onMouseDown={e => e.stopPropagation()}
-
-                    onClick={() => setShowKeys(false)}
-
-                    style={closeBtnStyle}
-
-                    aria-label="Close panel"
-
-                  >Ã—</button>
-
-                </div>
-
                 <AppKnob label="SYSTEM SCRL" size={96} />
-
               </div>
 
+              {/* key grid */}
 
+              <div className={`grid ${verticalKeys ? 'grid-cols-3' : 'grid-cols-4'}`} style={{ gap: 'var(--gap-standard)' }}>
 
-              {/* 3Ã—4 key grid */}
-
-              <div className="grid grid-cols-3" style={{ gap: 'var(--gap-standard)' }}>
-
-                {KEYS.map(key => {
+                {(verticalKeys ? KEYS_V : KEYS_H).map(key => {
 
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 
@@ -1510,7 +1503,7 @@ const action = config.buttons?.[key] || {} as any
 
                       onMouseDown={e => e.stopPropagation()}
 
-                      onClick={() => setSelected(key)}
+                      onClick={() => { if (isAudio) deckTogglersRef.current[key]?.(); else setSelected(key) }}
 
                       onContextMenu={e => {
 
@@ -1519,6 +1512,7 @@ const action = config.buttons?.[key] || {} as any
                         setCtxMenu({ key, x: e.clientX, y: e.clientY })
 
                         setCtxSrc(config.buttons?.[key]?.path || '')
+                        setCtxLabel(config.buttons?.[key]?.label || '')
 
                       }}
 
@@ -1647,6 +1641,8 @@ const action = config.buttons?.[key] || {} as any
                   )
 
                 })}
+
+              </div>
 
               </div>
 
@@ -1876,13 +1872,25 @@ const action = config.buttons?.[key] || {} as any
 
             <span style={{ fontSize: 'var(--fs-base)', fontWeight: 900, letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--text-40)' }}>
 
-              Edit Source â€” {ctxMenu.key.replace('key_', '').toUpperCase()}
+              Edit // {ctxMenu.key.replace('key_', '').toUpperCase()}
 
             </span>
 
             <input
-
               autoFocus
+              value={ctxLabel}
+              onChange={e => setCtxLabel(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') setCtxMenu(null) }}
+              placeholder="Display name..."
+              style={{
+                width: '100%', padding: '8px 12px', borderRadius: 'var(--radius-sm)',
+                border: '1px solid rgba(0,0,0,0.8)', background: 'var(--bg-input)',
+                color: 'var(--text-pure)', fontSize: 'var(--fs-lg)', outline: 'none',
+                boxShadow: 'var(--shadow-input)',
+              }}
+            />
+
+            <input
 
               value={ctxSrc}
 

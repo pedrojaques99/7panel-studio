@@ -7,7 +7,7 @@ const smBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
 
-export function BpmControl({ bpm, onChange, min = 40, max = 300, accent = 'var(--status-ok)', showSlider = false }: {
+export const BpmControl = React.memo(function BpmControl({ bpm, onChange, min = 40, max = 300, accent = 'var(--status-ok)', showSlider = false }: {
   bpm: number; onChange: (v: number) => void
   min?: number; max?: number; accent?: string; showSlider?: boolean
 }) {
@@ -103,4 +103,4 @@ export function BpmControl({ bpm, onChange, min = 40, max = 300, accent = 'var(-
         style={smBtn}>tap</button>
     </div>
   )
-}
+})
