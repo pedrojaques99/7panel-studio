@@ -44,6 +44,38 @@ def wav_factory(tmp_path_factory):
 
 
 @pytest.fixture(scope='session')
+def video_factory(tmp_path_factory):
+    """Fabrica MP4 sintetico (lavfi testsrc) em disco — pra testar dsp/video.py sem depender
+    de footage real do acervo. Devolve `fab(nome, dur_s=2.0)` -> caminho."""
+    d = tmp_path_factory.mktemp('video')
+
+    def fab(nome, dur_s=2.0, w=64, h=48):
+        p = str(d / ('%s.mp4' % nome))
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi',
+                        '-i', 'testsrc=size=%dx%d:rate=10:duration=%.2f' % (w, h, dur_s),
+                        '-pix_fmt', 'yuv420p', p], capture_output=True)
+        return p
+
+    return fab
+
+
+@pytest.fixture(scope='session')
+def imagem_factory(tmp_path_factory):
+    """Fabrica JPG sintetico (lavfi color) em disco — pra testar o caminho `tipo: 'imagem'`
+    de dsp/video.py. Devolve `fab(nome)` -> caminho."""
+    d = tmp_path_factory.mktemp('imagem')
+
+    def fab(nome, w=64, h=48):
+        p = str(d / ('%s.jpg' % nome))
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi',
+                        '-i', 'color=c=blue:size=%dx%d' % (w, h), '-frames:v', '1', p],
+                       capture_output=True)
+        return p
+
+    return fab
+
+
+@pytest.fixture(scope='session')
 def sinais():
     """Sinais com propriedade CONHECIDA, pra medida ter gabarito.
 

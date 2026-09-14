@@ -93,10 +93,11 @@ def test_render_de_preview_sai_no_tamanho_pedido(tom_20s, ruido_20s, tmp_path):
         c['alvo_lufs'] - c['lufs'] + mix.ganho_medio_respiracao_db(mix.PROFUNDIDADE_DB[0]), abs=0.05)
 
 
-def test_render_recusa_tres_camadas(tom_20s, tmp_path):
+def test_render_recusa_alem_do_maximo_de_camadas(tom_20s, tmp_path):
     item = {'id': 'x', 'titulo': 'x'}
+    demais = [{'item': item, 'fonte': tom_20s}] * (mix.MAX_CAMADAS + 1)
     with pytest.raises(ValueError):
-        mix.render(tom_20s, [{'item': item, 'fonte': tom_20s}] * 3, str(tmp_path / 'x.mp3'))
+        mix.render(tom_20s, demais, str(tmp_path / 'x.mp3'))
 
 
 # ── rotas ───────────────────────────────────────────────────────────────────
@@ -156,8 +157,67 @@ def test_render_valida_camadas(cli, ruido_20s):
     assert cli.post('/api/mix/render', json={'musica': ruido_20s, 'camadas': []}).status_code == 400
     assert cli.post('/api/mix/render', json={'musica': ruido_20s,
                                              'camadas': [{'id': 'nao-existe'}]}).status_code == 400
-    tres = [{'id': 'ruido'}] * 3
-    assert cli.post('/api/mix/render', json={'musica': ruido_20s, 'camadas': tres}).status_code == 400
+    demais = [{'id': 'ruido'}] * (mix.MAX_CAMADAS + 1)
+    assert cli.post('/api/mix/render', json={'musica': ruido_20s, 'camadas': demais}).status_code == 400
+
+
+# ── visual no export (PLAN-mix-export-video.md) ─────────────────────────────
+
+@pytest.fixture()
+def cli_com_visual(cli, tmp_path, monkeypatch, video_factory):
+    """Mesmo `cli`, mas com um catalogo de visual (1 video de 2s) e SAIDA_DIR numa pasta de
+    teste — sem isso os testes gravariam mp3/mp4 de verdade em backend/assets/mix."""
+    loop = video_factory('mix_visual_loop', dur_s=2.0)
+    catv = tmp_path / 'catv.json'
+    catv.write_text(json.dumps({'itens': [
+        {'id': 'vid1', 'titulo': 'vid1', 'tipo': 'video', 'dur_s': 2.0,
+         'categorias': ['abstrato'], 'thumb': None, 'caminho': loop},
+    ]}), encoding='utf-8')
+    monkeypatch.setattr(mix_routes, 'CATALOGO_VISUAL', str(catv))
+    monkeypatch.setattr(mix_routes, '_cache_visual', {'mtime': None, 'doc': None})
+    monkeypatch.setattr(mix_routes, 'SAIDA_DIR', str(tmp_path / 'saida'))
+    return cli
+
+
+def _espera(cli, job_id, tentativas=200):
+    import time
+    s = None
+    for _ in range(tentativas):
+        s = cli.get('/api/mix/status/%s' % job_id).get_json()
+        if s['status'] != 'running':
+            break
+        time.sleep(0.1)
+    return s
+
+
+def test_render_com_visual_desconhecido_e_400(cli_com_visual, ruido_20s):
+    r = cli_com_visual.post('/api/mix/render', json={
+        'musica': ruido_20s, 'camadas': [{'id': 'ruido'}], 'visual_id': 'nao-existe'})
+    assert r.status_code == 400
+
+
+@precisa_ffmpeg
+def test_render_com_visual_compoe_mp4_e_guarda_audio_puro(cli_com_visual, tom_20s):
+    r = cli_com_visual.post('/api/mix/render', json={
+        'musica': tom_20s, 'camadas': [{'id': 'ruido'}], 'visual_id': 'vid1'})
+    assert r.status_code == 200
+    s = _espera(cli_com_visual, r.get_json()['job_id'])
+    assert s['status'] == 'done', s
+    assert s['out'].endswith('.mp4') and os.path.isfile(s['out'])
+    assert s['audio_out'].endswith(('.mp3', '.wav')) and os.path.isfile(s['audio_out'])
+
+
+@precisa_ffmpeg
+def test_render_com_visual_no_preview_ignora_o_visual(cli_com_visual, tom_20s):
+    """Preview existe pra checar a cadeia de audio rapido — colar ffmpeg de video ali so
+    atrasa a iteracao (decisao registrada em PLAN-mix-export-video.md)."""
+    r = cli_com_visual.post('/api/mix/render', json={
+        'musica': tom_20s, 'camadas': [{'id': 'ruido'}], 'visual_id': 'vid1', 'preview_s': 3})
+    assert r.status_code == 200
+    s = _espera(cli_com_visual, r.get_json()['job_id'])
+    assert s['status'] == 'done', s
+    assert s['out'].endswith('.mp3')
+    assert 'audio_out' not in s
 
 
 def test_head_end_do_liminal_so_valem_pro_arquivo_do_liminal(cli, monkeypatch, tmp_path, ruido_20s):

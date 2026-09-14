@@ -17,7 +17,7 @@ import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { Mix } from './Mix'
-import { volumePreview, type Ambiente, type Faixa } from './modelo'
+import { MAX_CAMADAS, volumePreview, type Ambiente, type Faixa, type Visual } from './modelo'
 
 const AMB: Ambiente[] = [
   { id: 'cave', titulo: 'caverna escura', categorias: ['caverna'], origem: 'web', dur_s: 1800, lufs: -31, local: true, loop: true, avisos: [] },
@@ -26,6 +26,7 @@ const AMB: Ambiente[] = [
   { id: 'chuva-forte', titulo: 'chuva forte', categorias: ['chuva'], origem: 'proprio', dur_s: 840, lufs: -28, local: true, loop: false, avisos: [] },
 ]
 const MUS: Faixa[] = [{ grupo: 'era3', nome: 'xtal-vidro', caminho: 'Z:\\era3\\xtal-vidro.wav', mb: 26 }]
+const VIS: Visual[] = [{ id: 'vid1', titulo: 'loop abstrato', tipo: 'video', dur_s: 60, categorias: ['abstrato'], thumb: null }]
 
 let fetchSpy: ReturnType<typeof vi.fn>
 
@@ -34,8 +35,9 @@ beforeEach(() => {
     json: async () => (
       url.includes('/api/mix/catalog') ? { itens: AMB }
         : url.includes('/api/mix/musicas') ? { musicas: MUS }
-          : url.includes('/api/mix/render') ? { job_id: 'j1', status: 'running' }
-            : { status: 'running' }),
+          : url.includes('/api/mix/visuais') ? { itens: VIS }
+            : url.includes('/api/mix/render') ? { job_id: 'j1', status: 'running' }
+              : { status: 'running' }),
   }))
   vi.stubGlobal('fetch', fetchSpy)
 })
@@ -78,8 +80,8 @@ describe('o payload que vai pro /api/mix/render', () => {
     expect(b.musica).toBe('Z:\\era3\\xtal-vidro.wav')
     // a ORDEM importa: a primeira é o lugar, a segunda a textura
     expect(b.camadas).toEqual([
-      { id: 'cave', nivel_db: 0, respira: true },
-      { id: 'chuva-forte', nivel_db: 0, respira: true },
+      { id: 'cave', nivel_db: 0, respira: true, gap_s: 0 },
+      { id: 'chuva-forte', nivel_db: 0, respira: true, gap_s: 0 },
     ])
     expect(b.formato).toBe('mp3')
     expect(b.duracao_s).toBeNull()
@@ -90,6 +92,9 @@ describe('o payload que vai pro /api/mix/render', () => {
     const u = userEvent.setup()
     render(<Mix />)
     await escolher(u, /caverna escura/)
+    // duração/formato moraram atrás do popover de opções (achado #6 da auditoria) —
+    // abre antes de clicar em "1 h"
+    await u.click(screen.getByRole('button', { name: /música.*mp3/i }))
     await u.click(within(screen.getByRole('group', { name: /duração/i })).getByRole('button', { name: /1 h/ }))
     await u.click(screen.getByRole('button', { name: /preview 30/i }))
 
@@ -111,21 +116,74 @@ describe('o payload que vai pro /api/mix/render', () => {
   })
 })
 
-describe('as camadas', () => {
-  it('no máximo duas: a terceira não entra', async () => {
+describe('o visual do loop de 1h (PLAN-mix-export-video.md)', () => {
+  it('exportar leva visual_id quando um visual foi escolhido', async () => {
     const u = userEvent.setup()
     render(<Mix />)
-    await escolher(u, /caverna escura/, /chuva forte/, /Rua Campo Erê/)
-    const marcadas = within(listaAmb()).getAllByRole('button').filter(b => b.getAttribute('aria-pressed') === 'true')
-    expect(marcadas).toHaveLength(2)
-    expect(within(listaAmb()).getByRole('button', { name: /Rua Campo Erê/ })).toHaveAttribute('aria-disabled', 'true')
+    await escolher(u, /caverna escura/)
+    await u.click(await screen.findByRole('button', { name: /loop abstrato/i }))
+    await u.click(screen.getByRole('button', { name: /exportar/i }))
+    await waitFor(() => corpoDoRender())
+    expect(corpoDoRender().visual_id).toBe('vid1')
   })
 
-  it('o chip de categoria filtra a lista', async () => {
+  it('preview não leva visual_id, mesmo com um visual escolhido', async () => {
+    const u = userEvent.setup()
+    render(<Mix />)
+    await escolher(u, /caverna escura/)
+    await u.click(await screen.findByRole('button', { name: /loop abstrato/i }))
+    await u.click(screen.getByRole('button', { name: /preview 30/i }))
+    await waitFor(() => corpoDoRender())
+    expect(corpoDoRender().visual_id).toBeUndefined()
+  })
+
+  it('sem visual escolhido, exportar não leva visual_id', async () => {
+    const u = userEvent.setup()
+    render(<Mix />)
+    await escolher(u, /caverna escura/)
+    await u.click(screen.getByRole('button', { name: /exportar/i }))
+    await waitFor(() => corpoDoRender())
+    expect(corpoDoRender().visual_id).toBeUndefined()
+  })
+})
+
+describe('as camadas', () => {
+  it(`no máximo ${MAX_CAMADAS}: a próxima não entra`, async () => {
+    // o catálogo fixo (AMB) tem só 3 itens — MAX_CAMADAS é 12, então o teto de verdade
+    // pede um catálogo do tamanho do limite pra testar o limite (não um número arbitrário)
+    const muitas: Ambiente[] = Array.from({ length: MAX_CAMADAS + 1 }, (_, i) => ({
+      id: `amb-${i}`, titulo: `amb ${i}`, categorias: ['outro'], origem: 'pack',
+      dur_s: 1800, lufs: -30, local: true, loop: true, avisos: [],
+    }))
+    fetchSpy.mockImplementation(async (url: string) => ({
+      json: async () => (
+        url.includes('/api/mix/catalog') ? { itens: muitas }
+          : url.includes('/api/mix/musicas') ? { musicas: MUS }
+            : { status: 'running' }),
+    }))
+    const u = userEvent.setup()
+    render(<Mix />)
+    await u.click(await screen.findByRole('button', { name: /xtal-vidro/ }))
+    // divulgação progressiva (achado #2 da auditoria): a lista abre curada, "ver todas"
+    // tira o atalho do caminho pra este teste que precisa ver o catálogo inteiro
+    await u.click(await screen.findByRole('button', { name: /ver todas/i }))
+    for (const a of muitas) {
+      await u.click(within(listaAmb()).getByRole('button', { name: new RegExp(`^${a.titulo}\\b`) }))
+    }
+    const marcadas = within(listaAmb()).getAllByRole('button').filter(b => b.getAttribute('aria-pressed') === 'true')
+    expect(marcadas).toHaveLength(MAX_CAMADAS)
+    expect(within(listaAmb()).getByRole('button', { name: new RegExp(`^${muitas[MAX_CAMADAS].titulo}\\b`) }))
+      .toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('a categoria filtra a lista', async () => {
     const u = userEvent.setup()
     render(<Mix />)
     await screen.findByRole('button', { name: /xtal-vidro/ })
-    await u.click(within(screen.getByRole('group', { name: /categorias/i })).getByRole('button', { name: /caverna/ }))
+    // categoria virou combobox (achado #2 da auditoria): abre o popover do grupo
+    // "categorias" antes de escolher a categoria em si
+    await u.click(within(screen.getByRole('group', { name: /categorias/i })).getByRole('button', { name: /categoria/i }))
+    await u.click(await screen.findByRole('option', { name: /caverna/i }))
     const itens = within(listaAmb()).getAllByRole('button')
     expect(itens).toHaveLength(1)
     expect(itens[0]).toHaveAccessibleName(/caverna escura/)

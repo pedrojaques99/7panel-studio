@@ -14,13 +14,29 @@ export type Ambiente = {
   local: boolean
   loop: boolean
   avisos: string[]
+  uso?: number
 }
-export type Faixa = { grupo: string; nome: string; caminho: string; mb: number }
-export type Camada = { id: string; nivel_db: number; respira: boolean }
+export type Faixa = {
+  grupo: string; nome: string; caminho: string; mb: number
+  dur_s: number | null; modificado: string | null
+}
+export type Camada = { id: string; nivel_db: number; respira: boolean; gap_s: number }
+export type Visual = {
+  id: string
+  titulo: string
+  tipo: 'video' | 'imagem'
+  dur_s: number | null
+  categorias: string[]
+  thumb: string | null
+}
 export type Job = {
   status: 'running' | 'done' | 'error'
   progress?: number
   out?: string
+  /* só quando teve visual: job.out vira o .mp4 e o áudio puro (fade/limiter já aplicados,
+     sem vídeo por cima) continua salvo aqui — ver PLAN-mix-export-video.md */
+  audio_out?: string
+  compondo?: boolean
   error?: string
   preview?: boolean
   avisos?: string[]
@@ -32,7 +48,8 @@ export const CATEGORIAS = [
   'noite', 'cidade', 'interior', 'ruido', 'textura', 'outro',
 ] as const
 export const PAPEL = ['lugar', 'textura'] as const
-export const MAX_CAMADAS = 2
+export const MAX_CAMADAS = 12   // mesmo teto do backend (dsp/mix.py) — sanidade da linha de
+                                 // comando do ffmpeg, não limite criativo
 export const PREVIEW_S = 30
 export const DURACOES: { rotulo: string; s: number | null }[] = [
   { rotulo: '= música', s: null }, { rotulo: '1 h', s: 3600 }, { rotulo: '3 h', s: 10800 },
@@ -53,4 +70,54 @@ export function volumePreview(lufs: number | null, nivelDb: number, indice: numb
 
 export const mmss = (s: number | null) =>
   s == null ? '—' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+/* pro timecode do transporte: a era3/stretch/1h inteira e feita de faixa de 1h+, "60:15"
+   nao le como tempo — precisa da hora. */
+export const tempo = (s: number) => {
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    : `${m}:${String(sec).padStart(2, '0')}`
+}
 export const fmtDb = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(0)} dB`
+export const fmtS = (v: number) => (v <= 0 ? 'sem gap' : `${v.toFixed(0)} s`)
+
+/**
+ * Sugestão de próxima camada: heurística client-side, sem histórico novo no backend
+ * além do contador de uso que já vem no `/api/mix/catalog` (campo `uso`).
+ *
+ * Pontua por categoria ainda não usada nas camadas ativas (o que mais evita sopa),
+ * penaliza quem dispararia o mesmo aviso de repetição que `avisos` já calcula na tela,
+ * e usa `uso` só como desempate leve — a categoria nova pesa mais que a mais usada.
+ */
+export function sugerirCamadas(
+  ambientes: Ambiente[],
+  porId: Map<string, Ambiente>,
+  ativas: Camada[],
+  duracaoAlvo: number | null,
+  limite = 6,
+): Ambiente[] {
+  if (ativas.length >= MAX_CAMADAS) return []
+  const idsAtivos = new Set(ativas.map(c => c.id))
+  const categoriasUsadas = new Set(ativas.flatMap(c => porId.get(c.id)?.categorias ?? []))
+  const pontuado = ambientes
+    .filter(a => !idsAtivos.has(a.id))
+    .map(a => {
+      let pontos = 0
+      if (!a.categorias.some(k => categoriasUsadas.has(k))) pontos += 3
+      if (a.avisos.length === 0) pontos += 2
+      if (duracaoAlvo && a.dur_s && a.dur_s < 480 && duracaoAlvo / a.dur_s > 12) pontos -= 3
+      pontos += Math.min(a.uso ?? 0, 5) * 0.2
+      return { a, pontos }
+    })
+  pontuado.sort((x, y) => y.pontos - x.pontos)
+  return pontuado.slice(0, limite).map(p => p.a)
+}
+
+/** Compara ids (sem olhar nível/gap) — pra só oferecer "usar combo salvo" quando muda algo real. */
+export function combosIguais(a: Camada[], b: Camada[]): boolean {
+  if (a.length !== b.length) return false
+  const s = (xs: Camada[]) => xs.map(c => c.id).slice().sort().join(',')
+  return s(a) === s(b)
+}
