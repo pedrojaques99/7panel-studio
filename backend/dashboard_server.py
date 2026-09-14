@@ -2092,6 +2092,10 @@ def shield_stream():
     )
 
 
+# /mix — musica + ambiencia por cima (keyboard-ui/PLAN-rota-ambiente.md)
+from mix_routes import bp as mix_bp
+app.register_blueprint(mix_bp)
+
 if __name__ == '__main__':
     import socket, sys
     # Single-instance guard: se :5000 já está ocupada, sai limpo em vez de

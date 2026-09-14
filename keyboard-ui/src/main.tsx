@@ -12,6 +12,7 @@ import { OverlayPoll } from './overlay/OverlayPoll.tsx'
 import { Fabrica } from './fabrica/Fabrica.tsx'
 import { Eq } from './eq/Eq.tsx'
 import { Musica } from './musica/Musica.tsx'
+import { Mix } from './mix/Mix.tsx'
 
 const path = window.location.pathname
 
@@ -42,6 +43,9 @@ const views: Record<string, React.ReactNode> = {
   // onde a música mora: repertório, editor e histórico de versões por música
   '/musica':           <Musica />,
   '/musica/':          <Musica />,
+  // música por baixo, até duas ambiências por cima (catálogo único), preview e render
+  '/mix':              <Mix />,
+  '/mix/':             <Mix />,
 }
 
 createRoot(document.getElementById('root')!).render(
