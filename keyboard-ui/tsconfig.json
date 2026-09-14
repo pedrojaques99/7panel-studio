@@ -1,4 +1,8 @@
 {
+  // O `paths` precisa estar AQUI, alem do tsconfig.app.json: o shadcn CLI le o
+  // tsconfig raiz pra resolver os aliases do components.json. Sem isto ele nao
+  // resolve `@/` e escreve os arquivos numa pasta literal chamada `@`.
+  "compilerOptions": { "paths": { "@/*": ["./src/*"] } },
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },

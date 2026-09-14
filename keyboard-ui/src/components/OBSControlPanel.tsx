@@ -24,6 +24,34 @@ const panelStyle: React.CSSProperties = {
   overflow: 'hidden',
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function readJSON(key: string, fallback: any): any {
+  try { const r = localStorage.getItem(key); return r ? { ...fallback, ...JSON.parse(r) } : fallback } catch { return fallback }
+}
+
+const ovInput: React.CSSProperties = {
+  width: '100%', background: 'var(--bg-input)', border: '1px solid var(--border-light)',
+  borderRadius: 'var(--radius-sm)', color: 'var(--text-pure)', fontSize: 'var(--fs-lg)',
+  padding: '6px 10px', outline: 'none', boxShadow: 'var(--shadow-input)',
+}
+const ovLabel: React.CSSProperties = {
+  fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.35)', marginBottom: 3,
+  fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+}
+const miniBtn: React.CSSProperties = {
+  width: 26, height: 30, flexShrink: 0, background: 'var(--bg-hover)', border: '1px solid var(--border-light)',
+  borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 'var(--fs-lg)', lineHeight: 1,
+}
+function LiveToggle({ live, onClick }: { live: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} title={live ? 'Ao vivo no overlay' : 'Oculto'} style={{
+      background: live ? '#00b86022' : 'var(--bg-hover)', border: `1px solid ${live ? '#00b86055' : 'var(--border-light)'}`,
+      borderRadius: 'var(--radius-xs)', padding: '3px 10px', cursor: 'pointer', fontSize: 'var(--fs-md)',
+      color: live ? '#00b860' : 'rgba(255,255,255,0.4)', fontWeight: 600,
+    }}>{live ? 'Ao vivo' : 'Oculto'}</button>
+  )
+}
+
 export function OBSControlPanel({ onClose }: { onClose: () => void }) {
   const { zOf, bringToFront, endDrag, isDragging, scale } = usePanelCtx()
   const geo = loadGeo('obs', { x: 860, y: 20, w: 220, h: 420 })
@@ -43,6 +71,23 @@ export function OBSControlPanel({ onClose }: { onClose: () => void }) {
   const [wsUrl, setWsUrl] = useState(() => localStorage.getItem('obs-url') || 'ws://localhost:4455')
   const [wsPass, setWsPass] = useState(() => localStorage.getItem('obs-pass') || '')
   const [brbScene, setBrbScene] = useState(() => localStorage.getItem('obs-brb-scene') || 'Já Volto')
+
+  // ── Live overlays (browser sources same-origin em /overlay/question e /overlay/poll) ──
+  const [showOverlays, setShowOverlays] = useState(false)
+  const q0 = readJSON('overlay:question', { text: '', visible: false })
+  const p0 = readJSON('overlay:poll', { title: '', options: [{ label: 'Opção A', votes: 0 }, { label: 'Opção B', votes: 0 }], visible: false })
+  const [qText, setQText] = useState<string>(q0.text || '')
+  const [qLive, setQLive] = useState<boolean>(!!q0.visible)
+  const [pollTitle, setPollTitle] = useState<string>(p0.title || '')
+  const [pollOpts, setPollOpts] = useState<{ label: string; votes: number }[]>(p0.options?.length ? p0.options : [{ label: 'Opção A', votes: 0 }, { label: 'Opção B', votes: 0 }])
+  const [pollLive, setPollLive] = useState<boolean>(!!p0.visible)
+
+  useEffect(() => {
+    localStorage.setItem('overlay:question', JSON.stringify({ text: qText, label: 'Pergunta', visible: qLive }))
+  }, [qText, qLive])
+  useEffect(() => {
+    localStorage.setItem('overlay:poll', JSON.stringify({ title: pollTitle, options: pollOpts, visible: pollLive }))
+  }, [pollTitle, pollOpts, pollLive])
 
   const connect = useCallback(async () => {
     if (connectingRef.current) return
@@ -147,8 +192,46 @@ export function OBSControlPanel({ onClose }: { onClose: () => void }) {
       <div style={panelStyle}>
         <PanelHeader title="OBS" onClose={onClose} className="drag-handle">
           <span title={status} style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLOR[status], display: 'inline-block', boxShadow: status === 'connected' ? '0 0 6px var(--status-ok)' : 'none' }} />
+          <button onClick={() => setShowOverlays(v => !v)} title="Overlays de live" style={{ background: showOverlays ? 'var(--bg-active)' : 'none', border: 'none', borderRadius: 6, cursor: 'pointer', color: showOverlays ? '#00b860' : 'var(--text-40)', fontSize: 'var(--fs-2xl)', padding: '0 3px' }}>🎭</button>
           <button onClick={() => setShowConfig(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-40)', fontSize: 'var(--fs-2xl)', padding: '0 2px' }}>⚙</button>
         </PanelHeader>
+
+        {showOverlays && (
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Pergunta em destaque */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={ovLabel}>❓ Pergunta</span>
+                <LiveToggle live={qLive} onClick={() => setQLive(v => !v)} />
+              </div>
+              <textarea value={qText} onChange={e => setQText(e.target.value)} rows={2} placeholder="Pergunta em destaque na tela..." style={{ ...ovInput, resize: 'vertical', lineHeight: 1.4 }} />
+              <div style={{ fontSize: 'var(--fs-xs, 10px)', color: 'var(--text-25)' }}>OBS Browser Source → <code style={{ color: 'var(--text-40)' }}>localhost:5174/overlay/question</code></div>
+            </div>
+
+            {/* Enquete / poll */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={ovLabel}>📊 Enquete</span>
+                <LiveToggle live={pollLive} onClick={() => setPollLive(v => !v)} />
+              </div>
+              <input value={pollTitle} onChange={e => setPollTitle(e.target.value)} placeholder="Título da enquete" style={ovInput} />
+              {pollOpts.map((o, i) => (
+                <div key={i} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                  <input value={o.label} onChange={e => setPollOpts(prev => prev.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder={`Opção ${i + 1}`} style={{ ...ovInput, flex: 1 }} />
+                  <button onClick={() => setPollOpts(prev => prev.map((x, j) => j === i ? { ...x, votes: Math.max(0, x.votes - 1) } : x))} style={miniBtn}>−</button>
+                  <span style={{ minWidth: 22, textAlign: 'center', fontSize: 'var(--fs-md)', color: 'var(--text-60)', fontVariantNumeric: 'tabular-nums' }}>{o.votes}</span>
+                  <button onClick={() => setPollOpts(prev => prev.map((x, j) => j === i ? { ...x, votes: x.votes + 1 } : x))} style={miniBtn}>+</button>
+                  {pollOpts.length > 2 && <button onClick={() => setPollOpts(prev => prev.filter((_, j) => j !== i))} title="Remover" style={{ ...miniBtn, color: '#ef4444' }}>×</button>}
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 6 }}>
+                {pollOpts.length < 4 && <button onClick={() => setPollOpts(prev => [...prev, { label: '', votes: 0 }])} style={{ ...miniBtn, flex: 1, height: 'auto', padding: '5px 0', fontSize: 'var(--fs-md)' }}>+ opção</button>}
+                <button onClick={() => setPollOpts(prev => prev.map(x => ({ ...x, votes: 0 })))} style={{ ...miniBtn, flex: 1, height: 'auto', padding: '5px 0', fontSize: 'var(--fs-md)' }}>zerar votos</button>
+              </div>
+              <div style={{ fontSize: 'var(--fs-xs, 10px)', color: 'var(--text-25)' }}>OBS Browser Source → <code style={{ color: 'var(--text-40)' }}>localhost:5174/overlay/poll</code></div>
+            </div>
+          </div>
+        )}
         {showConfig && (
           <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {([

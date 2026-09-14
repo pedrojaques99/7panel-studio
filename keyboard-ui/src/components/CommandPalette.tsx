@@ -28,7 +28,12 @@ function PanelRow({ p, onTogglePanel, onClose }: { p: PanelDef; onTogglePanel: (
 
 export type PanelId =
   | 'keys' | 'mixer' | 'soundboard' | 'obs' | 'briefing'
-  | 'ytchat' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer' | 'synesthizer' | 'analogbrain'
+  | 'ytchat' | 'bot' | 'timer' | 'drone' | 'paul' | 'synth' | 'exporter' | 'converter' | 'looplab' | 'session' | 'visualizer' | 'retrotv' | 'ytdl' | 'audioplayer' | 'synesthizer' | 'analogbrain'
+  // esteira do stretch: SEED (analogbrain) -> TRIAGEM -> ESTICAR (paul) -> DOMAR
+  | 'triagem' | 'domar'
+  // 'drummachine' ja era usado em MULTI_INSTANCE_PANELS e no mapa de setters do
+  // App.tsx sem estar na uniao — erro de tipo pre-existente, corrigido aqui.
+  | 'drummachine'
 
 export type PanelDef = {
   id: PanelId
@@ -83,7 +88,7 @@ export function CommandPalette({ panels, onTogglePanel, onChangeSidebar, onClose
 
   const GROUPS: { label: string; ids: PanelId[] }[] = [
     { label: 'Core',  ids: ['keys', 'mixer', 'soundboard'] },
-    { label: 'Live',  ids: ['obs', 'ytchat', 'briefing', 'session', 'timer'] },
+    { label: 'Live',  ids: ['obs', 'ytchat', 'bot', 'briefing', 'session', 'timer'] },
     { label: 'Audio', ids: ['drone', 'paul', 'synth', 'looplab', 'drummachine', 'synesthizer'] },
     { label: 'Visual', ids: ['visualizer', 'retrotv'] },
     { label: 'Tools', ids: ['converter', 'exporter', 'ytdl', 'audioplayer'] },

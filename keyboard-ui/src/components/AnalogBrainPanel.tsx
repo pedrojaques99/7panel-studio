@@ -8,6 +8,8 @@ import { SynthKnob } from '../lib/SynthKnob'
 import { BpmControl } from '../lib/BpmControl'
 import { retroLedStyle } from '../lib/retro-tokens'
 import { StrudelService, type StrudelState } from '../lib/strudel-service'
+import { StrudelEditor } from './StrudelEditor'
+import { useJamBridge, type JamProposal } from '../hooks/useJamBridge'
 import { encodeWav } from '../lib/audio-utils'
 import { getAvailableStyles, MUTATIONS } from '../lib/style-cards'
 import {
@@ -131,6 +133,7 @@ export function AnalogBrainPanel({ onClose }: { onClose: () => void }) {
   const [scenes, setScenes] = useState<Array<{ name: string; code: string; volume: number; lpf: number; hpf: number; delay: number; reverb: number; bpm: number; ts: number }>>(() => loadJson('scenes', []))
   const [xyPreset, setXyPreset] = useState(0)
   const [showXY, setShowXY] = useState(false)
+  const [autoJam, setAutoJam] = useState<boolean>(() => loadJson('autoJam', false))
   const [crossfadeA, setCrossfadeA] = useState<number | null>(null)
   const [crossfadeB, setCrossfadeB] = useState<number | null>(null)
 
@@ -417,6 +420,32 @@ export function AnalogBrainPanel({ onClose }: { onClose: () => void }) {
     if (editCode.trim()) await evaluateCode(editCode)
   }, [editCode, evaluateCode])
 
+  // -- Jam bridge: Claude Code CLI <-> este painel --
+  const jam = useJamBridge({
+    code: editCode,
+    bpm,
+    playing: strudelState.playing,
+    error: strudelState.error,
+  })
+
+  /** Ouvir sem gravar: toca a proposta e deixa o editor intacto. */
+  const handleProposalHear = useCallback((pr: JamProposal) => {
+    serviceRef.current?.evaluate(pr.code).catch(() => {})
+  }, [])
+
+  const handleProposalAccept = useCallback((pr: JamProposal) => {
+    setEditCode(pr.code)
+    if (pr.bpm) setBpm(pr.bpm)
+    jam.accept(pr)
+    serviceRef.current?.evaluate(pr.code).catch(() => {})
+  }, [jam])
+
+  useEffect(() => {
+    if (autoJam && jam.proposal) handleProposalAccept(jam.proposal)
+  }, [autoJam, jam.proposal, handleProposalAccept])
+
+  useEffect(() => { saveJson('autoJam', autoJam) }, [autoJam])
+
   const clearChat = useCallback(() => {
     setMessages([]); chatHistoryRef.current = []; setEditCode('')
     setMutedLayers({}); setExpandedLayer(null); setTweakLayers([])
@@ -551,24 +580,40 @@ export function AnalogBrainPanel({ onClose }: { onClose: () => void }) {
                 fontSize: 13, lineHeight: 1.7, color: PHOSPHOR,
               }}>
                 <div style={scanlineOverlayStyle} />
-                <textarea
+                <StrudelEditor
                   value={editCode}
-                  onChange={e => setEditCode(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleEvalCode() }
-                  }}
-                  onWheel={e => e.stopPropagation()}
-                  spellCheck={false}
+                  onChange={setEditCode}
+                  onEvaluate={handleEvalCode}
+                  onStop={() => serviceRef.current?.stop()}
+                  accent={PHOSPHOR}
                   placeholder={'// Strudel code here — Ctrl+Enter to run\n// Ask the brain to generate a pattern →'}
-                  style={{
-                    width: '100%', height: '100%', resize: 'none',
-                    background: 'transparent', border: 'none', outline: 'none',
-                    color: PHOSPHOR, fontFamily: 'inherit', fontSize: 'inherit',
-                    lineHeight: 'inherit', padding: '12px 16px', margin: 0,
-                    overflow: 'auto',
-                  }}
                 />
               </div>
+
+              {/* Proposta do Claude (CLI) -- nada entra sem seu clique */}
+              {jam.proposal && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                  padding: '5px 10px', background: 'rgba(255,170,34,0.09)',
+                  borderTop: `1px solid ${AMBER}44`, fontFamily: 'monospace',
+                  fontSize: 10, color: AMBER, flexShrink: 0,
+                }}>
+                  <span style={{ ...retroLedStyle(true, AMBER, '#332800'), width: 6, height: 6, borderRadius: '50%', flexShrink: 0 }} />
+                  <span style={{ opacity: 0.8 }}>claude &middot; rev {jam.proposal.rev}</span>
+                  <span
+                    title={jam.proposal.message}
+                    style={{
+                      flex: 1, minWidth: 80, color: PHOSPHOR, opacity: 0.9,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {jam.proposal.message || '(sem mensagem)'}
+                  </span>
+                  <button onClick={() => handleProposalHear(jam.proposal!)} style={jamBtnStyle(AMBER)} title="Toca sem gravar no editor">OUVIR</button>
+                  <button onClick={() => handleProposalAccept(jam.proposal!)} style={jamBtnStyle(PHOSPHOR)} title="Vai pro editor e toca">ACEITAR</button>
+                  <button onClick={() => jam.dismiss(jam.proposal!)} style={jamBtnStyle('#ff6666')} title="Descartar">X</button>
+                </div>
+              )}
 
               {/* Scope */}
               <div style={{ height: 64, background: SCREEN_BG, borderTop: '1px solid rgba(255,255,255,0.04)', position: 'relative', flexShrink: 0 }}>
@@ -592,6 +637,24 @@ export function AnalogBrainPanel({ onClose }: { onClose: () => void }) {
                 <div onMouseDown={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center' }}>
                   <BpmControl bpm={bpm} onChange={setBpm} accent={PHOSPHOR} />
                 </div>
+                <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.06)' }} />
+                <button
+                  onClick={() => setAutoJam(v => !v)}
+                  onMouseDown={e => e.stopPropagation()}
+                  title={jam.online
+                    ? `Jam bridge ligada (rev ${jam.rev}). AUTO-JAM ${autoJam ? 'ON: aceita e toca sozinho' : 'OFF: voce aceita cada proposta'}`
+                    : 'Jam bridge offline -- sobe o dashboard_server.py'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4, padding: '1px 6px',
+                    background: 'transparent', cursor: 'pointer',
+                    border: `1px solid ${jam.online ? (autoJam ? AMBER : 'rgba(255,255,255,0.08)') : 'rgba(255,255,255,0.05)'}`,
+                    borderRadius: 3, fontFamily: 'monospace', fontSize: 8, letterSpacing: '0.08em',
+                    color: jam.online ? (autoJam ? AMBER : PHOSPHOR_DIM) : '#555',
+                  }}
+                >
+                  <span style={{ ...retroLedStyle(jam.online, autoJam ? AMBER : PHOSPHOR, '#222'), width: 6, height: 6, borderRadius: '50%' }} />
+                  JAM{autoJam ? ':AUTO' : ''}
+                </button>
                 {strudelState.error && (
                   <span
                     onClick={() => sendMessage(`Fix this error: ${strudelState.error}`)}
@@ -1013,6 +1076,14 @@ function powerBtnStyle(isOn: boolean): React.CSSProperties {
     fontFamily: 'monospace', fontSize: 9, fontWeight: 900, letterSpacing: '0.15em',
     background: isOn ? 'rgba(26,153,64,0.15)' : 'rgba(255,255,255,0.05)',
     color: isOn ? PHOSPHOR_DIM : '#555',
+  }
+}
+
+function jamBtnStyle(color: string): React.CSSProperties {
+  return {
+    padding: '1px 6px', background: 'transparent', border: `1px solid ${color}66`,
+    borderRadius: 3, color, cursor: 'pointer', fontFamily: 'monospace',
+    fontSize: 9, letterSpacing: '0.06em', flexShrink: 0,
   }
 }
 

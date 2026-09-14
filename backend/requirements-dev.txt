@@ -1,0 +1,9 @@
+# Dependencias so de teste. As de producao ficam em requirements.txt.
+#
+#   pip install -r requirements-dev.txt
+#   python -m pytest tests/ -q
+#
+# A suite inteira roda em ~12 s e precisa de `ffmpeg`/`ffprobe` no PATH — os testes
+# que dependem deles pulam sozinhos quando nao acham (marca `precisa_ffmpeg`).
+-r requirements.txt
+pytest>=8.0.0

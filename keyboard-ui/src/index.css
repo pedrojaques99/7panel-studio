@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 /* Hide scrollbar but keep scroll */
 .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
@@ -75,7 +77,68 @@
   --radius-sm: 8px;
   --radius-xs: 6px;
   --gap-standard: 12px;
+
+  /* ── MOTION ──────────────────────────────────────────────────────────
+     SSoT de easing e duracao. Componente NAO escreve cubic-bezier na mao:
+     duas curvas escritas por pessoas diferentes viram duas UIs.
+
+     --ease-out     entra/sai, responde a input. O padrao.
+     --ease-in-out  move de um ponto a outro DENTRO da tela.
+     --ease-drawer  a curva de gaveta do iOS. Gesto e snap.
+     Nunca ease-in em UI: comeca parado, e le como travamento.
+
+     Duracao: controle que responde a clique fica abaixo de 300 ms.        */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-press: 120ms;
+  --dur-fast: 160ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
   --key-size: clamp(88px, 8vw, 120px);
+  --vintage-surface-1: #0f0f0f;
+  --vintage-surface-2: #1a1a1a;
+  --vintage-surface-3: #2a2a2a;
+  --vintage-surface-3a: #3a3a3a;
+  --vintage-surface-4: #4a4a4a;
+  --vintage-border: #333333;
+  --vintage-label: #f0e68c;
+  --vintage-value: #ffd700;
+  --vintage-accent: #ff6b35;
+  --vintage-accent-deep: #ff4500;
+  --vintage-accent-glow: rgba(255, 107, 53, 0.6);
+  --vintage-needle: #ff0000;
+  --vintage-needle-glow: rgba(255, 0, 0, 0.5);
+  --vintage-text-muted: #888888;
+  --vintage-text-dim: #5c5c5c;
+  --vintage-meter-green: #22c55e;
+  --vintage-meter-yellow: #eab308;
+  --vintage-meter-orange: #f97316;
+  --vintage-meter-red: #ef4444;
+  --vintage-metal-light: #6a6a6a;
+  --vintage-metal-dark: #3a3a3a;
+  --vintage-metal-mid: #9ba0a6;
+  --vintage-metal-channel-light: #bebebe;
+  --vintage-metal-channel-dark: #a9a9a9;
+  --vintage-toggle-track: #403f3f;
+  --vintage-grid: #bbbaba;
+  --background: #0f0f0f;
+  --foreground: #e8e8e8;
+  --card: #1a1a1a;
+  --card-foreground: #e8e8e8;
+  --primary: #ffd700;
+  --primary-foreground: #0f0f0f;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #e8e8e8;
+  --muted: #2a2a2a;
+  --muted-foreground: #888888;
+  --accent: #ff6b35;
+  --accent-foreground: #ffffff;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #333333;
+  --input: #2a2a2a;
+  --ring: #ffd700;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -215,3 +278,228 @@ html.overlay {
   transition: all 0.15s;
 }
 .sidebar-stop:hover { background: rgba(239,68,68,0.2); color: rgba(239,68,68,1); }
+
+@theme inline { --font-vintage-display: 'Orbitron', sans-serif; --font-vintage-mono: 'Red Hat Mono', monospace; --font-vintage-body: 'Helvetica Neue', Helvetica, sans-serif; --color-ring: var(--ring); --color-input: var(--input); --color-border: var(--border); --color-destructive-foreground: var(--destructive-foreground); --color-destructive: var(--destructive); --color-accent-foreground: var(--accent-foreground); --color-accent: var(--accent); --color-muted-foreground: var(--muted-foreground); --color-muted: var(--muted); --color-secondary-foreground: var(--secondary-foreground); --color-secondary: var(--secondary); --color-primary-foreground: var(--primary-foreground); --color-primary: var(--primary); --color-card-foreground: var(--card-foreground); --color-card: var(--card); --color-foreground: var(--foreground); --color-background: var(--background); --color-vintage-grid: var(--vintage-grid); --color-vintage-toggle-track: var(--vintage-toggle-track); --color-vintage-metal-channel-dark: var(--vintage-metal-channel-dark); --color-vintage-metal-channel-light: var(--vintage-metal-channel-light); --color-vintage-metal-mid: var(--vintage-metal-mid); --color-vintage-metal-dark: var(--vintage-metal-dark); --color-vintage-metal-light: var(--vintage-metal-light); --color-vintage-meter-red: var(--vintage-meter-red); --color-vintage-meter-orange: var(--vintage-meter-orange); --color-vintage-meter-yellow: var(--vintage-meter-yellow); --color-vintage-meter-green: var(--vintage-meter-green); --color-vintage-text-dim: var(--vintage-text-dim); --color-vintage-text-muted: var(--vintage-text-muted); --color-vintage-needle-glow: var(--vintage-needle-glow); --color-vintage-needle: var(--vintage-needle); --color-vintage-accent-glow: var(--vintage-accent-glow); --color-vintage-accent-deep: var(--vintage-accent-deep); --color-vintage-accent: var(--vintage-accent); --color-vintage-value: var(--vintage-value); --color-vintage-label: var(--vintage-label); --color-vintage-border: var(--vintage-border); --color-vintage-surface-4: var(--vintage-surface-4); --color-vintage-surface-3a: var(--vintage-surface-3a); --color-vintage-surface-3: var(--vintage-surface-3); --color-vintage-surface-2: var(--vintage-surface-2); --color-vintage-surface-1: var(--vintage-surface-1); }
+
+.dark { --vintage-surface-1: #0f0f0f; --vintage-surface-2: #1a1a1a; --vintage-surface-3: #2a2a2a; --vintage-surface-3a: #3a3a3a; --vintage-surface-4: #4a4a4a; --vintage-border: #333333; --vintage-label: #f0e68c; --vintage-value: #ffd700; --vintage-accent: #ff6b35; --vintage-accent-deep: #ff4500; --vintage-accent-glow: rgba(255, 107, 53, 0.6); --vintage-needle: #ff0000; --vintage-needle-glow: rgba(255, 0, 0, 0.5); --vintage-text-muted: #888888; --vintage-text-dim: #5c5c5c; --vintage-meter-green: #22c55e; --vintage-meter-yellow: #eab308; --vintage-meter-orange: #f97316; --vintage-meter-red: #ef4444; --vintage-metal-light: #6a6a6a; --vintage-metal-dark: #3a3a3a; --vintage-metal-mid: #9ba0a6; --vintage-metal-channel-light: #bebebe; --vintage-metal-channel-dark: #a9a9a9; --vintage-toggle-track: #403f3f; --vintage-grid: #bbbaba; --background: #0f0f0f; --foreground: #e8e8e8; --card: #1a1a1a; --card-foreground: #e8e8e8; --primary: #ffd700; --primary-foreground: #0f0f0f; --secondary: #2a2a2a; --secondary-foreground: #e8e8e8; --muted: #2a2a2a; --muted-foreground: #888888; --accent: #ff6b35; --accent-foreground: #ffffff; --destructive: #ef4444; --destructive-foreground: #ffffff; --border: #333333; --input: #2a2a2a; --ring: #ffd700; }
+
+/* ── Editor Strudel (@strudel/codemirror) dentro do AnalogBrain ───────────── */
+/* CodeMirror precisa de altura explícita; sem isso colapsa em 1 linha. */
+.strudel-editor-root .cm-editor { height: 100%; background: transparent; }
+.strudel-editor-root .cm-editor.cm-focused { outline: none; }
+.strudel-editor-root .cm-scroller { overflow: auto; font-variant-ligatures: none; }
+.strudel-editor-root .cm-gutters { background: transparent; border-right: 1px solid rgba(255,255,255,0.04); }
+
+/* ── rota /musica: hover, foco e o marcador de fixada ──────────────────────
+ *
+ * Estas regras existem em CSS e não em `style` inline porque `:hover`,
+ * `:focus-visible` e `:focus-within` não existem em estilo inline — e era
+ * exatamente esse o defeito: `Repertorio.tsx` citava a classe `.musica-acoes`,
+ * que não tinha regra nenhuma no repo. O botão `⋯` ficava aceso nas 20 linhas
+ * (cromo permanente numa superfície de trabalho) e o comentário do arquivo
+ * descrevia um comportamento inexistente.
+ *
+ * A regra da casa: hover REVELA, hover nunca RELAYOUTA, e nada revelado só por
+ * hover pode ser o único caminho — `focus-visible` alcança tudo.
+ */
+
+.musica-linha {
+  position: relative;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-left: 2px solid transparent;
+}
+
+.musica-linha[data-ativa] {
+  border-left-color: #33ff66;             /* ACESO é exclusivo de "aberta" */
+  background: rgba(51, 255, 102, 0.06);
+}
+
+/* Afordância de alvo: a linha inteira é clicável, e o clique abre a música.
+   Sem realce, em 20 linhas de coluna estreita, não dá pra saber qual recebe. */
+.musica-linha:hover { background: rgba(217, 255, 227, 0.05); }
+.musica-linha[data-ativa]:hover { background: rgba(51, 255, 102, 0.10); }
+.musica-linha:hover .musica-nome { color: #d9ffe3; }   /* t70 → t100: peso, não hue */
+
+/* Foco de teclado tem que ser DIFERENTE de hover, não igual: 5% de fundo nos
+   dois deixaria os dois estados indistinguíveis. Anel, e para dentro, pra não
+   empurrar layout na coluna de 210px. */
+.musica-linha:focus-visible,
+.versao-linha:focus-visible {
+  outline: 1px solid #33ff66;
+  outline-offset: -1px;
+}
+
+.musica-acoes {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  width: 24px;                            /* era 18: alvo pequeno demais, e a 2px */
+  height: 24px;                           /* do clique que abre a música */
+  background: transparent;
+  border: none;
+  color: rgba(217, 255, 227, 0.45);
+  cursor: pointer;
+  font: 400 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.musica-linha:hover .musica-acoes,
+.musica-linha:focus-within .musica-acoes,
+.musica-acoes:focus-visible,
+.musica-acoes[aria-expanded="true"] { opacity: 1; }
+
+/* Marcador de fixada: quadrado CHEIO vs VAZADO. Preenchimento é o eixo que
+   sobrevive a print em preto e branco — e aqui não há cor pra gastar, tudo é o
+   mesmo verde. Estrela em caractere herdaria a métrica da fonte e desalinharia.
+   O gutter é reservado sempre: fixar não mexe no layout. */
+.musica-fixar {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.musica-marca {
+  width: 5px;
+  height: 5px;
+  display: block;
+  border: 1px solid rgba(217, 255, 227, 0.25);
+  background: transparent;
+}
+
+.musica-marca[data-cheia] {
+  border-color: rgba(217, 255, 227, 0.70);
+  background: rgba(217, 255, 227, 0.70);
+}
+
+.musica-linha:hover .musica-marca { border-color: rgba(217, 255, 227, 0.45); }
+.musica-linha:hover .musica-marca[data-cheia] {
+  border-color: #d9ffe3;
+  background: #d9ffe3;
+}
+
+.musica-fixar:focus-visible {
+  outline: 1px solid #33ff66;
+  outline-offset: 2px;
+}
+
+/* A coluna de versões tinha `tabIndex={0}` e `outline: none`: quem chegava por
+   Tab ficava cego, e o Enter ali troca o conteúdo do editor. */
+.versao-linha { cursor: pointer; }
+.versao-linha:hover { background: rgba(217, 255, 227, 0.05); }
+
+@media (prefers-reduced-motion: reduce) {
+  .musica-acoes { transition: none; }
+}
+
+/* Linha de duração do exportador: o realce era `onMouseEnter/onMouseLeave`, ou
+   seja, tabular pela lista não mostrava nada. */
+/* Casa da grade de arranjo.
+
+   O realce precisa existir em CSS, e nao em onMouseEnter, porque a casa tambem
+   recebe foco por TECLADO — a grade e uma matriz e navegar por seta e o que um
+   teclado espera dela. Estado de mouse em JS nao cobre isso.
+
+   E o estado mora em `aria-pressed`, nao em style inline: dito uma vez, na
+   semantica que o leitor de tela ja le, e sem inline ganhando da classe que
+   precisa sobrepor. */
+.grade-casa {
+  background: rgba(217, 255, 227, 0.06);
+  border: 1px solid rgba(217, 255, 227, 0.12);
+  transition: transform 0.08s ease-out, background 0.12s linear, border-color 0.12s linear;
+}
+
+/* Acesa = PREENCHIDA, que e como este design system carrega significado sem
+   cor. Mas preenchida em tinta CALMA: `fabrica/ui.ts` reserva o topo da escala
+   pra um elemento por bloco, e aqui esse um e onde a musica esta agora — nao a
+   forma parada, que nao muda faz meia hora. */
+.grade-casa[aria-pressed="true"] {
+  background: rgba(217, 255, 227, 0.42);
+  border-color: rgba(217, 255, 227, 0.42);
+}
+
+/* A coluna que esta tocando. A casa acesa DELA e o unico ACESO do bloco. */
+.grade-casa[data-agora="1"] { border-color: rgba(51, 255, 102, 0.45); }
+.grade-casa[data-agora="1"][aria-pressed="true"] {
+  background: #33ff66;
+  border-color: #33ff66;
+}
+
+.grade-casa:hover { opacity: 0.75; }
+/* Afunda um fio no toque: o gesto ganha resposta imediata, antes de o codigo
+   ser reescrito e voltar pelo estado. */
+.grade-casa:active { transform: scale(0.88); }
+.grade-casa:focus-visible {
+  outline: 1px solid #33ff66;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grade-casa { transition: none; }
+  .grade-casa:active { transform: none; }
+}
+
+/* O numero da casa: cabecalho da coluna E botao que apaga/acende a coluna
+   inteira. Ele nao pode ganhar peso de botao — e um rotulo de regua, e regua
+   com 8 botoes desenhados rouba a atencao da GRADE, que e o assunto.
+
+   Entao a afordancia mora no hover e no foco, e nao muda o tamanho de nada:
+   so o texto clareia e a coluna inteira acende de leve. Hover que relayouta
+   faz a regua tremer com o mouse passando, e a grade fica ilegivel enquanto
+   se escolhe a coluna. */
+.grade-coluna {
+  transition: color 0.12s linear, background 0.12s linear;
+}
+.grade-coluna:hover,
+.grade-coluna:focus-visible {
+  color: rgba(217, 255, 227, 0.9);
+  background: rgba(217, 255, 227, 0.1) !important;
+}
+.grade-coluna:focus-visible {
+  outline: 1px solid #33ff66;
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grade-coluna { transition: none; }
+}
+
+.export-tempo:hover { background: rgba(217, 255, 227, 0.12); }
+.export-tempo:focus-visible {
+  outline: 1px solid #33ff66;
+  outline-offset: -1px;
+  background: rgba(217, 255, 227, 0.12);
+}
+
+/* Movimento reduzido e sinal, nao "desligado": o resultado continua, o
+   deslocamento e que sai. Zerar as duracoes do SSoT cobre todo componente que
+   usa os tokens — e por isso eles existem. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-press: 0.01ms;
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+}
+
+/* Entrada do rótulo de tom no TomControl.
+
+   É animação de CONSEQUÊNCIA: o usuário produziu "+3" com a mão (isso não
+   anima, segue o dedo), e o tom resultante é o que o sistema respondeu. Roda
+   uma vez, curta, e só quando o resultado troca — no componente isso é a `key`
+   forçando remount, porque trocar o texto no lugar não lê como mudança.
+
+   Só transform e opacity. A duração vem do SSoT, então o guard de movimento
+   reduzido já cobre esta regra sem precisar repeti-la. */
+@keyframes tom-entra {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}

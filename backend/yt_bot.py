@@ -15,6 +15,14 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 import os
 
+try:
+    import ai_provider
+except Exception:
+    ai_provider = None
+
+# Cooldown global do !ai (evita queimar quota / spam)
+_ai_last_reply = 0.0
+
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'bot_config.json')
 TOKEN_FILE  = os.path.join(os.path.dirname(__file__), 'yt_token.json')
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
@@ -25,18 +33,32 @@ def load_config():
         return json.load(f)
 
 
+CLIENT_SECRET_FILE = os.path.join(os.path.dirname(__file__), 'client_secret.json')
+
+
 def get_youtube_service(config):
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+
+    # Token gerado pelo yt_auth_helper vem só com refresh_token (sem access token,
+    # logo sem expiry) — `creds.expired` é False aí. Renova sempre que houver
+    # refresh_token e o cred não estiver válido.
+    if creds and not creds.valid and creds.refresh_token:
+        creds.refresh(Request())
+
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, 'w') as f:
-            f.write(creds.to_json())
+        if not os.path.exists(CLIENT_SECRET_FILE):
+            raise SystemExit(
+                'Sem credencial do YouTube.\n'
+                'Rode UMA vez:  python yt_auth_helper.py\n'
+                '(reusa o OAuth client do visantlabs/Drive — nao precisa baixar client_secret.json)'
+            )
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+    with open(TOKEN_FILE, 'w') as f:
+        f.write(creds.to_json())
     return build('youtube', 'v3', credentials=creds)
 
 
@@ -50,7 +72,12 @@ def get_active_live_video_id(youtube):
     ).execute()
     items = resp.get('items', [])
     if not items:
-        raise ValueError('Nenhuma live ativa encontrada no canal.')
+        raise ValueError(
+            'Nenhuma live ativa encontrada NA CONTA AUTENTICADA.\n'
+            'Se o bot roda numa conta separada (nao a dona do canal), isso e esperado: '
+            'a auto-deteccao so enxerga as lives da propria conta.\n'
+            'Solucao: preencha o "Video ID da live" no painel (ou video_id no bot_config.json).'
+        )
     video_id = items[0]['id']
     title = items[0]['snippet'].get('title', '')
     print(f'[bot] Live detectada: "{title}" ({video_id})')
@@ -147,6 +174,37 @@ def handle_message(youtube, live_chat_id, msg, config):
                     print(f'[cmd] Erro ao responder: {e}')
             return
 
+    # IA — responde quando a mensagem começa com o trigger (ex.: "!ai ...")
+    ai_cfg = config.get('ai', {})
+    if ai_provider and ai_cfg.get('enabled'):
+        trigger = (ai_cfg.get('trigger') or '!ai').lower()
+        if text_lower.startswith(trigger):
+            global _ai_last_reply
+            cooldown = float(ai_cfg.get('cooldown_secs', 15))
+            if time.time() - _ai_last_reply < cooldown:
+                print(f'[ai] cooldown ativo — ignorando "{text[:40]}"')
+                return
+            prompt = text[len(trigger):].strip()
+            if not prompt:
+                return
+            try:
+                # Marca de bot: deixa explícito pra audiência que a resposta é de IA
+                # (o post sai com o OAuth do dono do canal, então sem isso parece
+                # que foi o próprio streamer que respondeu).
+                prefix = ai_cfg.get('reply_prefix', '🤖')
+                # desconta o prefixo do orçamento pra não estourar os 200 chars do YT
+                budget = dict(ai_cfg)
+                budget['max_reply_chars'] = max(40, int(ai_cfg.get('max_reply_chars', 200)) - len(prefix) - 1)
+                reply = ai_provider.generate_reply(budget, f'{author} perguntou: {prompt}')
+                if reply:
+                    full = f'{prefix} {reply}'.strip() if prefix else reply
+                    post_chat_message(youtube, live_chat_id, full)
+                    _ai_last_reply = time.time()
+                    print(f'[ai] → {full[:80]}')
+            except Exception as e:
+                print(f'[ai] Erro: {e}')
+            return
+
 
 def main():
     config = load_config()
@@ -202,6 +260,13 @@ def main():
         try:
             r = requests.get(f"{config['flask_url']}/api/bot/auto-msgs", timeout=2)
             config['auto_msgs'] = r.json()
+        except Exception:
+            pass
+
+        # Reload da config de IA (permite editar provider/prompt pelo painel ao vivo)
+        try:
+            r = requests.get(f"{config['flask_url']}/api/bot/ai-config?full=1", timeout=2)
+            config['ai'] = r.json()
         except Exception:
             pass
 

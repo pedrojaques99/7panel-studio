@@ -101,6 +101,21 @@ const STYLE_CARDS: StyleCard[] = [
 - Modulation: all params modulated by sine/perlin at different slow rates`,
   },
   {
+    id: 'eno',
+    keywords: ['eno', 'brian eno', 'ambient', 'music for airports', 'drone', 'esticar', 'stretch', 'paulstretch', 'cama'],
+    prompt: `STYLE: Brian Eno / Ambient (fonte para Paulstretch)
+- Este material vai ser esticado 12×: densidade harmônica é boa, pulso rítmico é PROIBIDO
+- Acordes consonantes sustentados: note("<[c3,e3,g3,b3] [a2,c3,e3,g3] [f2,a2,c3,e3]>").slow(4) ou mais lento
+- Envelope sem borda: .attack(2).release(6) no mínimo, .attack(4).release(10) melhor ainda
+- Timbres: sine, triangle, piano — nada de sawtooth agressivo, nada de .distort()
+- Modulação lenta por LFO: .gain(sine.slow(0.1).range(0.3,0.55))
+- Filtro respirando: .lpf(sine.slow(0.05).range(800,1800))
+- Panorama à deriva: .pan(sine.slow(0.08).range(-0.4,0.4))
+- Reverb generoso: .room(0.8).size(0.8), delay longo .delay(0.4).delaytime(0.5)
+- SEM percussão nenhuma: nada de bd, sd, hh, cp, rim. Sem arpejo rápido, sem groove
+- Escalas: maior, lídia, pentatônica — consonância, sem tensão a resolver`,
+  },
+  {
     id: 'trap',
     keywords: ['trap', 'hip hop', 'hiphop', 'rap beat', '808', 'metro boomin', 'pierre bourne', 'travis scott'],
     prompt: `STYLE: Trap / Hip-Hop
@@ -202,6 +217,39 @@ function tweakNumericParam(code: string, method: string, transform: (v: number) 
   return code.replace(re, (_, val) => `.${method}(${parseFloat(transform(parseFloat(val)).toFixed(4))})`)
 }
 
+// percussive layer detection: s("bd*4"), "sd", "hh", "cp", "rim", .bank(...)
+const PERC_RE = /\.bank\(|["'`][^"'`]*\b(?:bd|sd|hh|cp|rim)\b/
+
+// split the args of the first `stack(` at depth 0 (quote/bracket aware)
+function splitStackLayers(code: string): { head: string; layers: string[]; tail: string } | null {
+  const open = code.indexOf('stack(')
+  if (open < 0) return null
+  const start = open + 'stack('.length
+  let depth = 0, quote = '', i = start
+  const layers: string[] = []
+  let last = start
+  for (; i < code.length; i++) {
+    const ch = code[i]
+    if (quote) { if (ch === quote && code[i - 1] !== '\\') quote = ''; continue }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue }
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; continue }
+    if (ch === ')' && depth === 0) break
+    if (ch === ')' || ch === ']' || ch === '}') { depth--; continue }
+    if (ch === ',' && depth === 0) { layers.push(code.slice(last, i)); last = i + 1 }
+  }
+  if (i >= code.length) return null // unbalanced — bail
+  layers.push(code.slice(last, i))
+  return { head: code.slice(0, start), layers, tail: code.slice(i) }
+}
+
+// append .slow(2) to an expression chunk that has no .slow() yet
+function ensureSlow(chunk: string): string {
+  if (/\.slow\(/.test(chunk)) return chunk
+  const m = chunk.match(/^([\s\S]*\))(\s*)$/)
+  if (!m) return chunk
+  return `${m[1]}.slow(2)${m[2]}`
+}
+
 export const MUTATIONS: MutationDef[] = [
   {
     id: 'darker',
@@ -260,8 +308,50 @@ export const MUTATIONS: MutationDef[] = [
     apply: (code) => {
       let c = tweakNumericParam(code, 'room', v => Math.min(1, v + 0.2))
       c = tweakNumericParam(c, 'size', v => Math.min(1, v + 0.15))
-      c = tweakNumericParam(code, 'delay', v => Math.min(0.8, v + 0.15))
+      // encadeia em `c`, não em `code`: lendo do original aqui, os dois passos
+      // acima eram descartados e só o `delay` sobrevivia à mutação.
+      c = tweakNumericParam(c, 'delay', v => Math.min(0.8, v + 0.15))
       return c
+    },
+  },
+  {
+    id: 'sem-pulso',
+    label: 'sem pulso',
+    apply: (code) => {
+      try {
+        let c = code
+
+        // (a) drop percussive layers
+        const split = splitStackLayers(c)
+        if (split) {
+          const kept = split.layers.filter(l => !PERC_RE.test(l))
+          if (kept.length > 0 && kept.length < split.layers.length) {
+            c = split.head + kept.join(',') + split.tail
+          }
+        } else {
+          // `$: s("bd*4")` style lines — safe to drop whole lines
+          const lines = c.split('\n')
+          const kept = lines.filter(l => !(/^\s*\$\s*\w*\s*:/.test(l) && PERC_RE.test(l)))
+          if (kept.length > 0 && kept.length < lines.length) c = kept.join('\n')
+        }
+
+        // (b) widen time: double .slow(), insert .slow(2) where absent
+        c = tweakNumericParam(c, 'slow', v => v * 2)
+        const split2 = splitStackLayers(c)
+        if (split2) {
+          c = split2.head + split2.layers.map(ensureSlow).join(',') + split2.tail
+        } else if (!/[;\n]\s*\$\s*\w*\s*:/.test(c)) {
+          c = ensureSlow(c)
+        }
+
+        // (c) lengthen envelope
+        c = tweakNumericParam(c, 'attack', v => Math.max(2, v * 2))
+        c = tweakNumericParam(c, 'release', v => Math.max(6, v * 2))
+
+        return c
+      } catch {
+        return code
+      }
     },
   },
   {

@@ -71,3 +71,12 @@ backend/keyboard_config.json
 launcher.html
 
 .vercel
+
+# Bot secrets (Gemini/YT keys) — mantém local, usa bot_config.example.json como template
+backend/bot_config.json
+backend/yt_token.json
+backend/bot.log
+backend/client_secret.json
+
+# estado runtime da jam bridge (não é código)
+backend/jam_session.json
