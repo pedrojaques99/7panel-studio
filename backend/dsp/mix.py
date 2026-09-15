@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-mix.py - musica por baixo, ate duas camadas de ambiencia por cima, em loop sem emenda.
+mix.py - musica por baixo, N camadas de ambiencia por cima, cada uma em loop sem emenda.
 
 Porta enxuta do `Jacao Ambients/_prod/_tools/ambiente.py`, onde a tese ja foi ouvida e
 aprovada. O que veio de la, e por que:
@@ -13,6 +13,12 @@ aprovada. O que veio de la, e por que:
   COSTURA     a cauda entra por cima da cabeca em crossfade. Quando o catalogo traz
               head/end medidos (os do liminal), recorta antes: pula o fade ja assado no
               arquivo, senao a costura cai num buraco.
+  GAP         camada tambem aceita um silencio no fim de cada volta (`gap_s`): textura que
+              e evento isolado (um canto, uma rajada) nao devia tocar colada nela mesma.
+
+Os presets (LUFS/profundidade/ciclo) so existem pra DUAS posicoes — lugar e textura — porque
+so essas duas foram testadas por ouvido. Camada 3+ CICLA por essas mesmas duas posicoes
+(`% len(...)`) em vez de inventar um terceiro numero que ninguem ouviu ainda.
 
 O que e novo aqui e o preview FIEL: os 30 s de preview passam pela mesma cadeia do export
 (mesmo ganho medido, mesma costura). A unica diferenca e a respiracao: num trecho de 30 s
@@ -22,13 +28,16 @@ No preview ela vira o ganho MEDIO do ciclo, que e o que o ouvido percebe ao long
 import json, math, os, subprocess, tempfile
 
 MUSICA_LUFS = -20.0
-CAMADA_LUFS = (-34.0, -40.0)      # pico do lugar, pico da textura
-PROFUNDIDADE_DB = (14.0, 10.0)
-CICLO_S = (210.0, 137.0)
+CAMADA_LUFS = (-34.0, -40.0)      # pico do lugar, pico da textura — cicla pra camada 3+
+PROFUNDIDADE_DB = (14.0, 10.0)    # idem
+CICLO_S = (210.0, 137.0)          # idem
 XFADE_S = 6.0
 FADE_S = 6.0
 LIMITE = 0.891                    # -1 dBFS
 FMT = 'aformat=sample_rates=48000:channel_layouts=stereo'
+# nao e limiar criativo (esse nao existe mais) — e so pra a linha de comando do ffmpeg nao
+# virar um filter_complex gigante. 12 camadas ja é mais textura do que qualquer mix pede.
+MAX_CAMADAS = 12
 
 
 def _r(cmd):
@@ -104,6 +113,19 @@ def unidade_loop(src, tmpdir, tag, xfade=XFADE_S, head=None, end=None):
     return out, dur(out), costurou
 
 
+def com_gap(unid_wav, tmpdir, tag, gap_s):
+    """Acrescenta `gap_s` de silencio no fim da unidade, antes do -stream_loop repetir —
+    e o que separa 'textura em loop continuo' de 'evento que toca, cala, toca nao'."""
+    if gap_s <= 0:
+        return unid_wav
+    out = os.path.join(tmpdir, '%s_gap.wav' % tag)
+    r = _r(['ffmpeg', '-y', '-v', 'error', '-i', unid_wav, '-af', 'apad=pad_dur=%.3f' % gap_s,
+            '-c:a', 'pcm_f32le', out])
+    if r.returncode != 0:
+        raise RuntimeError('gap falhou: %s' % r.stderr.decode(errors='ignore')[-300:])
+    return out
+
+
 def avisos_fixos(item):
     """O que da pra avisar ANTES do render, so com as medidas do catalogo."""
     out = []
@@ -128,11 +150,13 @@ def aviso_repeticao(titulo, unidade_s, total_s):
 
 
 def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None, progresso=None):
-    """camadas: [{'item': <item do catalogo>, 'fonte': caminho ou url, 'nivel_db': float, 'respira': bool}]
+    """camadas: [{'item': <item do catalogo>, 'fonte': caminho ou url, 'nivel_db': float,
+    'respira': bool, 'gap_s': float}]
 
-    `nivel_db` e relativo ao limiar da casa: 0 = CAMADA_LUFS do papel da camada."""
-    if not 1 <= len(camadas) <= 2:
-        raise ValueError('de 1 a 2 camadas de ambiencia')
+    `nivel_db` e relativo ao limiar da casa: 0 = CAMADA_LUFS do papel da camada (camada 3+
+    cicla pelos dois papeis testados). `gap_s` e silencio entre uma volta e a proxima."""
+    if not 1 <= len(camadas) <= MAX_CAMADAS:
+        raise ValueError('de 1 a %d camadas de ambiencia' % MAX_CAMADAS)
     tmp = tempfile.mkdtemp(prefix='mix_')
     dm = dur(musica)
     if dm <= 0:
@@ -171,15 +195,23 @@ def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None
             end = min(float(end), ini + max(T + 2 * XFADE_S + 2, 60.0)) if end else ini + max(T + 2 * XFADE_S + 2, 60.0)
         unid, du, costurou = unidade_loop(c['fonte'], tmp, 'camada%d' % i, head=head, end=end)
         la = lufs(unid)
-        alvo = CAMADA_LUFS[i] + float(c.get('nivel_db') or 0.0)
+        p = i % len(CAMADA_LUFS)                # camada 3+ cicla pelos dois papeis testados
+        alvo = CAMADA_LUFS[p] + float(c.get('nivel_db') or 0.0)
         ga = alvo - la if la is not None else 0.0
         respira = bool(c.get('respira', True))
         resp = ''
         if respira:
             if preview:
-                ga += ganho_medio_respiracao_db(PROFUNDIDADE_DB[i])
+                ga += ganho_medio_respiracao_db(PROFUNDIDADE_DB[p])
             else:
-                resp = respiracao(PROFUNDIDADE_DB[i], CICLO_S[i])
+                resp = respiracao(PROFUNDIDADE_DB[p], CICLO_S[p])
+        # o gap vale no preview tambem: o `-t T` ja corta no tamanho pedido, entao silencio
+        # nao estica o preview — e zerar aqui fazia o knob parecer que nao fazia nada.
+        # LUFS ja foi medido antes (acima), o silencio nao puxa o ganho.
+        gap_s = max(0.0, float(c.get('gap_s') or 0.0))
+        if gap_s > 0:
+            unid = com_gap(unid, tmp, 'camada%d' % i, gap_s)
+            du += gap_s
         entradas += ['-stream_loop', str(max(math.ceil(T / du), 1) - 1), '-i', unid]
         cadeias.append('[%d:a]%s,volume=%.2fdB%s[c%d]' % (i + 1, FMT, ga, resp, i))
         rotulos.append('[c%d]' % i)

@@ -16,6 +16,10 @@ o DSP mora em `dsp/mix.py` (audio) e `dsp/video.py` (mux do visual escolhido).
   POST /api/mix/visual-pick      {musica, visual_id} — grava a escolha
   GET  /api/mix/camada-pick?musica=   ultimo combo de camadas salvo pra essa musica (camada_picks.json)
   POST /api/mix/camada-pick      {musica, camadas} — grava o combo; camadas=[] apaga
+  GET  /api/mix/mixes            mixes salvos com nome, mais recente primeiro
+  POST /api/mix/mixes            {nome, musica, camadas, visual_id, duracao_s, formato} — mesmo
+                                  nome+musica sobrescreve
+  DELETE /api/mix/mixes/<id>     apaga um mix salvo
 """
 import json, os, threading, uuid
 from datetime import datetime
@@ -30,6 +34,7 @@ CATALOGO_VISUAL = os.path.join(AQUI, 'assets', 'visual_catalog.json')
 ESCOLHAS_VISUAL = os.path.join(AQUI, 'assets', 'visual_picks.json')
 ESCOLHAS_CAMADA = os.path.join(AQUI, 'assets', 'camada_picks.json')   # ultimo combo por musica
 USO_CAMADA = os.path.join(AQUI, 'assets', 'camada_uso.json')          # contagem por ambiencia, so em export real
+MIXES = os.path.join(AQUI, 'assets', 'mixes_salvos.json')             # mixes com nome, {id: mix}
 SAIDA_DIR = os.path.join(AQUI, 'assets', 'mix')
 JACAO = os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients')
 
@@ -231,10 +236,22 @@ _jobs = {}
 DURACAO_MAX_S = 4 * 3600
 
 
+NOME_MAX = 180   # caminho inteiro; MAX_PATH do Windows e 260 e o .mp4 irmao usa o mesmo nome
+
+
 def _nome_saida(musica, ids, duracao_s, formato):
+    import hashlib
+
     base = os.path.splitext(os.path.basename(musica))[0]
     sufixo = '' if not duracao_s else ('__%gh' % round(duracao_s / 3600, 2))
-    return os.path.join(SAIDA_DIR, '%s__%s%s.%s' % (base, '+'.join(ids), sufixo, formato))
+    camadas = '+'.join(ids)
+    caminho = os.path.join(SAIDA_DIR, '%s__%s%s.%s' % (base, camadas, sufixo, formato))
+    if len(caminho) > NOME_MAX:
+        # 6 camadas de nome longo passaram de 260 e o ffmpeg nem abria o arquivo
+        # ("Invalid argument"). Hash estavel: mesmo combo, mesmo nome.
+        camadas = '%dcamadas-%s' % (len(ids), hashlib.sha1(camadas.encode()).hexdigest()[:8])
+        caminho = os.path.join(SAIDA_DIR, '%s__%s%s.%s' % (base[:60], camadas, sufixo, formato))
+    return caminho
 
 
 @bp.route('/api/mix/render', methods=['POST'])
@@ -391,3 +408,50 @@ def mix_camada_pick_post():
         d.pop(musica, None)
     _grava_json(ESCOLHAS_CAMADA, d)
     return jsonify({'ok': True, 'musica': musica, 'camadas': camadas})
+
+
+# ── mixes salvos com nome: o camada-pick guarda so o ultimo por musica; aqui cabem varios ──
+
+def _lista_mixes():
+    return sorted(_le_json(MIXES).values(), key=lambda m: m.get('salvo_em') or '', reverse=True)
+
+
+@bp.route('/api/mix/mixes', methods=['GET'])
+def mix_mixes_get():
+    return jsonify({'mixes': _lista_mixes()})
+
+
+@bp.route('/api/mix/mixes', methods=['POST'])
+def mix_mixes_post():
+    b = request.get_json(silent=True) or {}
+    nome = (b.get('nome') or '').strip()
+    musica = (b.get('musica') or '').strip()
+    if not nome or not musica:
+        return jsonify({'error': 'nome e musica obrigatorios'}), 400
+    camadas = b.get('camadas') or []
+    itens = {i['id'] for i in catalogo()['itens']}
+    for c in camadas:
+        if c.get('id') not in itens:
+            return jsonify({'error': 'ambiencia desconhecida: %s' % c.get('id')}), 400
+    d = _le_json(MIXES)
+    # mesmo nome na mesma musica = sobrescreve (salvar de novo nao duplica a lista)
+    mix_id = next((k for k, m in d.items() if m.get('nome') == nome and m.get('musica') == musica),
+                  uuid.uuid4().hex[:12])
+    d[mix_id] = {
+        'id': mix_id, 'nome': nome, 'musica': musica, 'camadas': camadas,
+        'visual_id': b.get('visual_id') or None,
+        'duracao_s': b.get('duracao_s') or None,
+        'formato': 'wav' if b.get('formato') == 'wav' else 'mp3',
+        'salvo_em': datetime.now().isoformat(timespec='seconds'),
+    }
+    _grava_json(MIXES, d)
+    return jsonify({'ok': True, 'id': mix_id, 'mixes': _lista_mixes()})
+
+
+@bp.route('/api/mix/mixes/<mix_id>', methods=['DELETE'])
+def mix_mixes_delete(mix_id):
+    d = _le_json(MIXES)
+    if d.pop(mix_id, None) is None:
+        return jsonify({'error': 'mix nao encontrado'}), 404
+    _grava_json(MIXES, d)
+    return jsonify({'ok': True, 'mixes': _lista_mixes()})

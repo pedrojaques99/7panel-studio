@@ -20,6 +20,7 @@ export function useKnobDrag({
   const [currentValue, setCurrentValue] = useState(value);
   const [isDragging, setIsDragging] = useState(false);
   const lastY = useRef(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const valRef = useRef(currentValue);
   valRef.current = currentValue;
@@ -70,18 +71,28 @@ export function useKnobDrag({
     onChangeRef.current?.(mid);
   }, [fromNorm]);
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // React 17+ registra o listener de wheel da raiz como passive — dentro de um onWheel do
+  // JSX, e.preventDefault() é ignorado em silêncio (sem warning, sem erro: só não faz nada).
+  // O scroll da página "vence" e o knob nunca muda. Só um listener nativo (addEventListener
+  // com passive:false) consegue de fato bloquear o scroll — por isso o wheel mora num
+  // useEffect com ref, não num handler React comum como os outros (mouseDown/doubleClick).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
       e.stopPropagation();
       const fine = e.shiftKey ? 0.002 : 0.012;
       const dir = e.deltaY < 0 ? 1 : -1;
       const norm = toNorm(valRef.current) + dir * fine;
       const next = clamp(fromNorm(Math.max(0, Math.min(1, norm))));
+      valRef.current = next;
       setCurrentValue(next);
       onChangeRef.current?.(next);
-    },
-    [toNorm, fromNorm, clamp]
-  );
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, [toNorm, fromNorm, clamp]);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -111,8 +122,8 @@ export function useKnobDrag({
     currentValue,
     rotation,
     isDragging,
+    containerRef,
     handleMouseDown,
     handleDoubleClick,
-    handleWheel,
   };
 }

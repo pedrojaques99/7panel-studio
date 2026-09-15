@@ -217,9 +217,9 @@ export function VintageKnob({
     currentValue,
     rotation,
     isDragging,
+    containerRef,
     handleMouseDown,
     handleDoubleClick,
-    handleWheel,
   } = useKnobDrag({ min, max, value, log, onChange });
 
   const scale = size / 81;
@@ -227,13 +227,13 @@ export function VintageKnob({
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "flex flex-col items-center gap-1 select-none",
         className
       )}
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
-      onWheel={handleWheel}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       title={`${label}: ${fmt ? fmt(currentValue) : currentValue.toFixed(2)}\ndrag ↕ · shift=fine · scroll · dbl-click=reset`}

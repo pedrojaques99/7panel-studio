@@ -93,6 +93,18 @@ def test_render_de_preview_sai_no_tamanho_pedido(tom_20s, ruido_20s, tmp_path):
         c['alvo_lufs'] - c['lufs'] + mix.ganho_medio_respiracao_db(mix.PROFUNDIDADE_DB[0]), abs=0.05)
 
 
+@precisa_ffmpeg
+def test_preview_aplica_o_gap(tom_20s, ruido_20s, tmp_path):
+    """O knob de GAP tem que valer no preview: zerar ali fazia o knob parecer morto,
+    e o `-t` do preview ja garante que o silencio nao estica o tamanho pedido."""
+    item = {'id': 'ruido', 'titulo': 'ruido', 'medidas': None, 'loop': None}
+    base = dict(item=item, fonte=ruido_20s, nivel_db=0.0, respira=False)
+    sem = mix.render(tom_20s, [dict(base, gap_s=0)], str(tmp_path / 'sem.mp3'), preview_s=5)
+    com = mix.render(tom_20s, [dict(base, gap_s=8)], str(tmp_path / 'com.mp3'), preview_s=5)
+    assert com['camadas'][0]['unidade_s'] == pytest.approx(sem['camadas'][0]['unidade_s'] + 8, abs=0.2)
+    assert mix.dur(str(tmp_path / 'com.mp3')) == pytest.approx(5.0, abs=0.2)
+
+
 def test_render_recusa_alem_do_maximo_de_camadas(tom_20s, tmp_path):
     item = {'id': 'x', 'titulo': 'x'}
     demais = [{'item': item, 'fonte': tom_20s}] * (mix.MAX_CAMADAS + 1)
@@ -249,3 +261,33 @@ def test_head_end_do_liminal_so_valem_pro_arquivo_do_liminal(cli, monkeypatch, t
     por_id = {c['item']['id']: c for c in vistos}
     assert por_id['cave-local']['fonte'] == ruido_20s and por_id['cave-local']['item']['loop'] is None
     assert por_id['cave-remota']['fonte'] == url and por_id['cave-remota']['item']['loop'] == loop
+
+
+def test_nome_saida_cabe_no_max_path_com_muitas_camadas():
+    # 6 camadas de nome longo passaram de 260 e o ffmpeg falhava com "Invalid argument"
+    import mix_routes
+    musica = r'Z:\acervo\navegantes-phi-v1-10m10s.wav'
+    ids = ['aeroporto-internacional-de-navegantes-ministro-victor-konder-%d' % i for i in range(6)]
+    longo = mix_routes._nome_saida(musica, ids, None, 'mp3')
+    assert len(os.path.splitext(longo)[0] + '.mp4') < 260
+    assert '6camadas-' in longo
+    assert longo == mix_routes._nome_saida(musica, ids, None, 'mp3')   # mesmo combo, mesmo nome
+    curto = mix_routes._nome_saida(musica, ['birds'], None, 'mp3')
+    assert curto.endswith('navegantes-phi-v1-10m10s__birds.mp3')        # combo curto segue legivel
+
+
+def test_mixes_salvos_salva_sobrescreve_lista_e_apaga(cli, monkeypatch, tmp_path, ruido_20s):
+    import mix_routes
+    monkeypatch.setattr(mix_routes, 'MIXES', str(tmp_path / 'mixes_salvos.json'))
+    assert cli.get('/api/mix/mixes').get_json() == {'mixes': []}
+    corpo = {'nome': 'noite', 'musica': ruido_20s, 'camadas': [{'id': 'ruido', 'nivel_db': -3, 'gap_s': 10, 'respira': False}],
+             'visual_id': 'vid1', 'duracao_s': 3600, 'formato': 'wav'}
+    r = cli.post('/api/mix/mixes', json=corpo).get_json()
+    assert r['ok'] and r['mixes'][0]['camadas'][0]['nivel_db'] == -3 and r['mixes'][0]['formato'] == 'wav'
+    # mesmo nome + mesma musica sobrescreve, nao duplica
+    r2 = cli.post('/api/mix/mixes', json=dict(corpo, formato='mp3')).get_json()
+    assert r2['id'] == r['id'] and len(r2['mixes']) == 1 and r2['mixes'][0]['formato'] == 'mp3'
+    assert cli.post('/api/mix/mixes', json=dict(corpo, camadas=[{'id': 'nao-existe'}])).status_code == 400
+    assert cli.post('/api/mix/mixes', json=dict(corpo, nome='  ')).status_code == 400
+    assert cli.delete('/api/mix/mixes/%s' % r['id']).get_json()['mixes'] == []
+    assert cli.delete('/api/mix/mixes/%s' % r['id']).status_code == 404

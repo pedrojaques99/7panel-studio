@@ -13,7 +13,7 @@
  * só o fetch: mede-se controle, não som.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { render, screen, within, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { Mix } from './Mix'
@@ -25,7 +25,7 @@ const AMB: Ambiente[] = [
     avisos: ['Rua Campo Erê tem voz em 81% do arquivo: fala num fundo e o pior evento'] },
   { id: 'chuva-forte', titulo: 'chuva forte', categorias: ['chuva'], origem: 'proprio', dur_s: 840, lufs: -28, local: true, loop: false, avisos: [] },
 ]
-const MUS: Faixa[] = [{ grupo: 'era3', nome: 'xtal-vidro', caminho: 'Z:\\era3\\xtal-vidro.wav', mb: 26 }]
+const MUS: Faixa[] = [{ grupo: 'era3', nome: 'xtal-vidro', caminho: 'Z:\\era3\\xtal-vidro.wav', mb: 26, dur_s: null, modificado: null }]
 const VIS: Visual[] = [{ id: 'vid1', titulo: 'loop abstrato', tipo: 'video', dur_s: 60, categorias: ['abstrato'], thumb: null }]
 
 let fetchSpy: ReturnType<typeof vi.fn>
@@ -147,6 +147,44 @@ describe('o visual do loop de 1h (PLAN-mix-export-video.md)', () => {
   })
 })
 
+describe('gap no ▶ do browser', () => {
+  it('com gap, a camada sai do loop nativo e volta a tocar depois do silêncio, mesmo com re-render no meio', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    fetchSpy.mockImplementation(async (url: string) => ({
+      json: async () => (
+        url.includes('/api/mix/catalog') ? { itens: AMB }
+          : url.includes('/api/mix/musicas') ? { musicas: MUS }
+            : url.includes('/api/mix/camada-pick') ? { camadas: [{ id: 'cave', nivel_db: 0, respira: true, gap_s: 1 }] }
+              : { status: 'running' }),
+    }))
+    const u = userEvent.setup()
+    const { container } = render(<Mix />)
+    await u.click(await screen.findByRole('button', { name: /xtal-vidro/ }))
+    await u.click(await screen.findByRole('button', { name: /usar combo salvo/i }))
+    const cam = await waitFor(() => {
+      const a = container.querySelector<HTMLAudioElement>('audio[src*="id=cave"]')
+      expect(a).not.toBeNull()
+      return a!
+    })
+    expect(cam.loop).toBe(false)
+    const mus = [...container.querySelectorAll('audio')].find(a => a !== cam)!
+    fireEvent.play(mus)
+    await waitFor(() => expect(play).toHaveBeenCalled())
+    play.mockClear()
+
+    fireEvent.ended(cam)
+    // o bug que isto guarda: o timeupdate da música re-renderiza durante o gap e o ref
+    // inline limpava o timer — a camada nunca mais voltava a tocar
+    fireEvent.timeUpdate(mus)
+    await new Promise(r => setTimeout(r, 400))
+    fireEvent.timeUpdate(mus)
+    expect(play).not.toHaveBeenCalled()
+    await waitFor(() => expect(play).toHaveBeenCalled(), { timeout: 2000 })
+    play.mockRestore()
+  })
+})
+
 describe('as camadas', () => {
   it(`no máximo ${MAX_CAMADAS}: a próxima não entra`, async () => {
     // o catálogo fixo (AMB) tem só 3 itens — MAX_CAMADAS é 12, então o teto de verdade
@@ -174,7 +212,9 @@ describe('as camadas', () => {
     expect(marcadas).toHaveLength(MAX_CAMADAS)
     expect(within(listaAmb()).getByRole('button', { name: new RegExp(`^${muitas[MAX_CAMADAS].titulo}\\b`) }))
       .toHaveAttribute('aria-disabled', 'true')
-  })
+    // 13 cliques sequenciais de userEvent: roda em ~4,6 s isolado, e com a máquina
+    // carregada estourava o default de 5 s sem nada estar quebrado
+  }, 15_000)
 
   it('a categoria filtra a lista', async () => {
     const u = userEvent.setup()
@@ -207,5 +247,46 @@ describe('volumePreview', () => {
   })
   it('textura fica abaixo do lugar no mesmo knob', () => {
     expect(volumePreview(-31, 0, 1)).toBeLessThan(volumePreview(-31, 0, 0))
+  })
+})
+
+describe('mixes salvos', () => {
+  const chamada = (pedaco: string, metodo: string) =>
+    fetchSpy.mock.calls.find(c => String(c[0]).includes(pedaco) && c[1]?.method === metodo)
+
+  it('salvar manda música, camadas, visual, duração e formato com o nome', async () => {
+    const u = userEvent.setup()
+    render(<Mix />)
+    await escolher(u, /caverna escura/)
+    await u.click(screen.getByRole('button', { name: /^mixes/i }))
+    await u.type(screen.getByRole('textbox', { name: /nome do mix/i }), 'noite na caverna')
+    await u.click(screen.getByRole('button', { name: /^salvar$/i }))
+    await waitFor(() => expect(chamada('/api/mix/mixes', 'POST')).toBeDefined())
+    const b = JSON.parse(chamada('/api/mix/mixes', 'POST')![1].body)
+    expect(b.nome).toBe('noite na caverna')
+    expect(b.musica).toBe(MUS[0].caminho)
+    expect(b.camadas.map((c: { id: string }) => c.id)).toEqual(['cave'])
+    expect(b.formato).toBe('mp3')
+  })
+
+  it('abrir um mix salvo restaura camadas com knob, visual e formato até o export', async () => {
+    const SALVO = {
+      id: 'm1', nome: 'guardado', musica: MUS[0].caminho, visual_id: 'vid1', duracao_s: null, formato: 'wav', salvo_em: '',
+      camadas: [{ id: 'chuva-forte', nivel_db: -3, respira: false, gap_s: 10 }],
+    }
+    const base = fetchSpy.getMockImplementation() as (url: string) => Promise<unknown>
+    fetchSpy.mockImplementation(async (url: string, init?: RequestInit) =>
+      String(url).includes('/api/mix/mixes') && !init?.method ? { json: async () => ({ mixes: [SALVO] }) } : base(url))
+    const u = userEvent.setup()
+    render(<Mix />)
+    await screen.findByRole('button', { name: /xtal-vidro/ })
+    await u.click(screen.getByRole('button', { name: /^mixes/i }))
+    await u.click(await screen.findByRole('option', { name: /guardado/ }))
+    await u.click(screen.getByRole('button', { name: /exportar/i }))
+    await waitFor(() => expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/mix/render'))).toBe(true))
+    const b = corpoDoRender()
+    expect(b.camadas).toEqual(SALVO.camadas)
+    expect(b.formato).toBe('wav')
+    expect(b.visual_id).toBe('vid1')
   })
 })

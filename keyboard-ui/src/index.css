@@ -503,3 +503,24 @@ html.overlay {
   from { opacity: 0; transform: translateY(-2px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ── rota /mix: hover e entrada de camada ───────────────────────────────────
+ *
+ * Mesma regra da /musica: hover REVELA (muda cor/borda), nunca `scale`, nunca
+ * empurra layout vizinho. `Mix.tsx` é 100% `style` inline (`:hover` não existe
+ * em inline), daí as classes aqui em vez de mais uma prop de estado por botão.
+ */
+.mix-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--vintage-value);
+  color: var(--vintage-value);
+}
+.mix-linha:hover { background: var(--vintage-surface-2); }
+.mix-linha[aria-disabled="true"]:hover { background: transparent; }
+
+/* Camada entrando no painel de ambiência/música — consequência de um clique
+   que já aconteceu (adicionar/tirar), não decoração de carregamento de tela. */
+@keyframes mix-entra {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+.mix-entra { animation: mix-entra var(--dur-base) var(--ease-out); }

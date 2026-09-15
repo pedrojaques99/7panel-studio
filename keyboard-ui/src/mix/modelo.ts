@@ -21,6 +21,11 @@ export type Faixa = {
   dur_s: number | null; modificado: string | null
 }
 export type Camada = { id: string; nivel_db: number; respira: boolean; gap_s: number }
+/* mix com nome, gravado em backend/assets/mixes_salvos.json — tudo que o export precisa */
+export type MixSalvo = {
+  id: string; nome: string; musica: string; camadas: Camada[]
+  visual_id: string | null; duracao_s: number | null; formato: 'mp3' | 'wav'; salvo_em: string
+}
 export type Visual = {
   id: string
   titulo: string

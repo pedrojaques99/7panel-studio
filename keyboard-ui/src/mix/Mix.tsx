@@ -23,8 +23,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Anchor, AudioLines, Bird, Building2, Check, ChevronDown, ChevronRight, CircleDashed,
   CloudRain, Droplet, Filter, Flame, Gamepad2, History, Home, Layers, Maximize2, Moon,
-  Mountain, MoreHorizontal, Pause, PartyPopper, Play, Settings2, Ship, Shapes, Sparkles,
-  Trees, Volume2, VolumeX, Wind, X,
+  Mountain, MoreHorizontal, Pause, PartyPopper, Play, Save, Settings2, Ship, Shapes, Sparkles,
+  Trash2, Trees, Volume2, VolumeX, Wind, X,
 } from 'lucide-react'
 import { VintageKnob } from '@/components/ui/vintage-knob'
 import { VintageLed } from '@/components/ui/vintage-led'
@@ -34,7 +34,7 @@ import { resolveUrl, audioSrc } from '../lib/api'
 import {
   CATEGORIAS, DURACOES, MAX_CAMADAS, PAPEL, PREVIEW_S, combosIguais, fmtDb, fmtS, mmss,
   sugerirCamadas, tempo, volumePreview,
-  type Ambiente, type Camada, type Faixa, type Job, type Visual,
+  type Ambiente, type Camada, type Faixa, type Job, type MixSalvo, type Visual,
 } from './modelo'
 
 /* um icone por categoria de ambiência — a lista era só texto, agora escaneia mais rápido */
@@ -97,8 +97,14 @@ const painel: React.CSSProperties = {
 /* os controles da camada ativa (nível, mudo, respira) — sempre no TOPO do painel de
    ambiência/música, colados na coisa que eles afetam, não numa seção à parte lá embaixo. */
 const paramCard: React.CSSProperties = {
-  display: 'grid', gap: 8, justifyItems: 'start', padding: 12,
+  display: 'grid', gap: 8, justifyItems: 'start', padding: 12, position: 'relative',
   background: 'var(--vintage-surface-1)', border: '1px solid var(--vintage-border)', minWidth: 190,
+}
+/* "tirar" desgrudado do auto-layout dos outros botões — some no canto, não compete
+   com mudo/respira por espaço na mesma linha */
+const botaoTirar: React.CSSProperties = {
+  position: 'absolute', top: 6, right: 6, padding: 4,
+  background: 'transparent', border: 'none', color: 'var(--vintage-text-dim)', cursor: 'pointer',
 }
 
 /**
@@ -171,13 +177,27 @@ export function Mix() {
   const [verTodasAmb, setVerTodasAmb] = useState(false)
   const [comboSalvo, setComboSalvo] = useState<Camada[]>([])
   const [opcoesAbertas, setOpcoesAbertas] = useState(false)
+  const [mixes, setMixes] = useState<MixSalvo[]>([])
+  const [mixesAbertos, setMixesAbertos] = useState(false)
+  const [nomeMix, setNomeMix] = useState('')
+  /* abrir mix de OUTRA música: o effect do visual-pick relê a escolha salva da música e
+     atropelaria o visual do mix — ele consulta este ref antes */
+  const mixPendente = useRef<MixSalvo | null>(null)
 
   const timerRef = useRef<number | null>(null)
   const camadaRefs = useRef<Record<string, HTMLAudioElement | null>>({})
+  const gapTimers = useRef<Record<string, number>>({})
+  const tocandoRef = useRef(tocando)
+  tocandoRef.current = tocando
   const musicaRef = useRef<HTMLAudioElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [mudo, setMudo] = useState<Set<string>>(() => new Set())
   const [posicao, setPosicao] = useState({ atual: 0, dur: 0 })
+
+  const limpaGaps = useCallback(() => {
+    for (const t of Object.values(gapTimers.current)) window.clearTimeout(t)
+    gapTimers.current = {}
+  }, [])
 
   useEffect(() => {
     let vivo = true
@@ -200,14 +220,21 @@ export function Mix() {
     return () => {
       vivo = false
       if (timerRef.current) window.clearInterval(timerRef.current)
+      limpaGaps()
     }
-  }, [])
+  }, [limpaGaps])
 
   const porId = useMemo(() => new Map(ambientes.map(a => [a.id, a])), [ambientes])
 
   /* o vídeo do loop de 1h é escolha por música: relê a escolha salva quando troca de música */
   useEffect(() => {
     if (!musica) { setVisualId(null); return }
+    const pendente = mixPendente.current
+    if (pendente?.musica === musica.caminho) {
+      mixPendente.current = null
+      setVisualId(pendente.visual_id)
+      return
+    }
     let vivo = true
     void fetch(resolveUrl(`/api/mix/visual-pick?musica=${encodeURIComponent(musica.caminho)}`))
       .then(r => r.json()).then(d => { if (vivo) setVisualId(d?.visual_id ?? null) })
@@ -228,9 +255,9 @@ export function Mix() {
     return () => { vivo = false }
   }, [musica])
 
-  /* grava o combo (estrutura, não cada arrasto de knob) sempre que a música está escolhida —
-     debounced pra não escrever um arquivo a cada tecla de busca de categoria */
-  const assinaturaCamadas = camadas.map(c => c.id).join(',')
+  /* grava o combo inteiro (camadas + nível/gap/respira) sempre que a música está escolhida —
+     só o id perdia o ajuste de knob ao voltar. Debounced: um arrasto vira uma escrita só */
+  const assinaturaCamadas = camadas.map(c => `${c.id}:${c.nivel_db}:${c.gap_s}:${c.respira}`).join(',')
   useEffect(() => {
     if (!musica) return
     const t = window.setTimeout(() => {
@@ -242,6 +269,53 @@ export function Mix() {
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [musica, assinaturaCamadas])
+
+  /* mixes com nome: vários por música, sobrevivem a trocar de música e a fechar a aba */
+  useEffect(() => {
+    void fetch(resolveUrl('/api/mix/mixes'))
+      .then(r => r.json()).then(d => setMixes(Array.isArray(d?.mixes) ? d.mixes : []))
+      .catch(() => { /* sem backend a lista fica vazia; o erro de carga já aparece acima */ })
+  }, [])
+
+  const salvarMix = useCallback(async () => {
+    const nome = nomeMix.trim()
+    if (!musica || !nome) return
+    try {
+      const r = await fetch(resolveUrl('/api/mix/mixes'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, musica: musica.caminho, camadas, visual_id: visualId, duracao_s: duracao, formato }),
+      })
+      const d = await r.json()
+      if (d?.error) { setErro(String(d.error)); return }
+      setMixes(d?.mixes ?? [])
+    } catch (e) { setErro(String(e)) }
+  }, [nomeMix, musica, camadas, visualId, duracao, formato])
+
+  const abrirMix = useCallback((m: MixSalvo) => {
+    const f = faixas.find(x => x.caminho === m.musica)
+    if (!f) { setErro(`a música do mix "${m.nome}" não está mais no acervo: ${m.musica}`); return }
+    if (musica?.caminho === f.caminho) setVisualId(m.visual_id)
+    else { mixPendente.current = m; setMusica(f) }
+    setCamadas(m.camadas.filter(c => porId.has(c.id)).slice(0, MAX_CAMADAS))
+    setDuracao(m.duracao_s)
+    setFormato(m.formato)
+    setNomeMix(m.nome)
+    setMixesAbertos(false)
+    // o visual do mix vira a escolha da música também, pra reabrir a música bater com o mix
+    void fetch(resolveUrl('/api/mix/visual-pick'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ musica: m.musica, visual_id: m.visual_id }),
+    }).catch(() => { /* rede piscou: o mix em si continua salvo */ })
+  }, [faixas, musica, porId])
+
+  const apagarMix = useCallback(async (id: string) => {
+    try {
+      const r = await fetch(resolveUrl(`/api/mix/mixes/${encodeURIComponent(id)}`), { method: 'DELETE' })
+      const d = await r.json()
+      if (d?.error) { setErro(String(d.error)); return }
+      setMixes(d?.mixes ?? [])
+    } catch (e) { setErro(String(e)) }
+  }, [])
 
   const usarComboSalvo = useCallback(() => {
     setCamadas(comboSalvo.filter(c => porId.has(c.id)).slice(0, MAX_CAMADAS))
@@ -345,7 +419,9 @@ export function Mix() {
     camadas.forEach((c, i) => {
       const el = camadaRefs.current[c.id]
       if (el) el.volume = mudo.has(c.id) ? 0 : volumePreview(porId.get(c.id)?.lufs ?? null, c.nivel_db, i)
-      if (el && tocando && el.paused) {
+      // parada no meio de um gap não é "pausada": dar play aqui (girar um knob dispara este
+      // effect) cortaria o silêncio que o `onEnded` agendou
+      if (el && tocando && el.paused && !gapTimers.current[c.id]) {
         const p = el.play()
         if (p) p.catch(() => { /* autoplay recusado: o próximo ▶ resolve */ })
       }
@@ -354,14 +430,17 @@ export function Mix() {
 
   const sincroniza = useCallback((tocar: boolean) => {
     setTocando(tocar)
-    if (!tocar) for (const el of Object.values(camadaRefs.current)) el?.pause()
+    if (!tocar) {
+      for (const el of Object.values(camadaRefs.current)) el?.pause()
+      limpaGaps()
+    }
     // o video do visual escolhido toca junto — e o "como se fosse o render" do transporte
     const v = videoRef.current
     if (v) {
       if (tocar && v.paused) v.play().catch(() => { /* autoplay recusado: o proximo clique resolve */ })
       else if (!tocar) v.pause()
     }
-  }, [])
+  }, [limpaGaps])
 
   /* Play/pause único: toca a música e, junto, tudo que já estiver marcado como camada —
      é o "player" pedido, em vez do usuário ter que achar o transporte nativo do <audio>. */
@@ -455,8 +534,22 @@ export function Mix() {
 
         {/* as camadas ativas ficam escondidas aqui (audio + volume real), mas o CONTROLE delas
             mora dentro do painel de ambiência, colado na textura que cada uma é — ver abaixo */}
+        {/* com gap, o `loop` nativo sai e o silêncio entre as voltas é um setTimeout no
+            `ended` — sem isso o ▶ ignorava o knob de GAP (só o export aplicava) */}
         {camadas.map(c => (
-          <audio key={c.id} ref={el => { camadaRefs.current[c.id] = el }} loop preload="none"
+          <audio key={c.id} ref={el => { camadaRefs.current[c.id] = el }} loop={c.gap_s <= 0} preload="none"
+            onEnded={e => {
+              const el = e.currentTarget
+              // o timer NÃO pode ser limpo no ref: ref inline recebe null a cada re-render
+              // (o timeupdate da música re-renderiza várias vezes por segundo) e a camada
+              // nunca mais voltava. Camada tirada no meio do gap = <audio> desconectado.
+              gapTimers.current[c.id] = window.setTimeout(() => {
+                delete gapTimers.current[c.id]
+                if (!tocandoRef.current || !el.isConnected) return
+                el.currentTime = 0
+                el.play().catch(() => { /* autoplay recusado: o próximo ▶ resolve */ })
+              }, c.gap_s * 1000)
+            }}
             src={resolveUrl(`/api/mix/file?id=${encodeURIComponent(c.id)}`)} style={{ display: 'none' }} />
         ))}
         {/* a música tem só ESTE elemento — sem controle nativo visível duplicado. O transporte
@@ -473,6 +566,11 @@ export function Mix() {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+          {/* ── música e visual na mesma coluna: o visual é escolha por música, faz
+              sentido morar colado nela, não solto embaixo do layout inteiro. flex column
+              (não grid+alignContent:start) pra o visual poder crescer (flex:1 nele, abaixo)
+              e a coluna acompanhar a altura da ambiência ao lado, em vez de sobrar vazio ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* ── a música ── */}
           <section style={painel}>
             <span style={rotulo}>1 · música</span>
@@ -504,6 +602,52 @@ export function Mix() {
             </ul>
           </section>
 
+          {/* ── o visual do loop de 1h ── */}
+          {musica && (
+            // flex column (não o grid+alignContent:start do `painel`): é o que deixa o
+            // grid de thumbnails logo abaixo crescer com flex:1 e preencher o resto da
+            // coluna, acompanhando a altura da ambiência ao lado em vez de sobrar vazio
+            <section style={{ ...painel, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <span style={rotulo}>3 · visual do loop de 1h — footage já usado no canal</span>
+              <SeletorCategorias grupoLabel="categorias do visual" todas={Object.keys(contagemVisual).sort()} contagem={contagemVisual}
+                ativos={catsVisual} onToggle={alternaCatVisual} icones={ICONE_VISUAL} rotuloVazio="categoria" />
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                gap: 8, gridAutoRows: 'min-content', flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 2,
+              }}>
+                {visFiltrados.map(v => {
+                  const ativo = visualId === v.id
+                  return (
+                    <button key={v.id} type="button" className="mix-btn" aria-pressed={ativo} title={v.titulo}
+                      onClick={() => escolherVisual(v.id)}
+                      style={{
+                        display: 'grid', gap: 4, padding: 4, cursor: 'pointer', textAlign: 'left',
+                        background: ativo ? 'var(--vintage-surface-3)' : 'var(--vintage-surface-2)',
+                        border: `1px solid ${ativo ? 'var(--vintage-value)' : 'var(--vintage-border)'}`,
+                      }}>
+                      {v.thumb
+                        ? <img src={resolveUrl(v.thumb)} alt="" loading="lazy"
+                            style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', display: 'block' }} />
+                        : <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--vintage-surface-1)' }} />}
+                      <span style={{
+                        color: ativo ? 'var(--vintage-value)' : 'var(--vintage-label)',
+                        fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {v.titulo}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {visualId && (
+                <span style={{ ...rotulo, color: 'var(--vintage-text-dim)' }}>
+                  escolhido: {visuais.find(v => v.id === visualId)?.titulo}
+                </span>
+              )}
+            </section>
+          )}
+          </div>
+
           {/* ── as ambiências ── */}
           <section style={painel}>
             <span style={rotulo}>2 · ambiência — o zero do nível é o limiar da casa</span>
@@ -513,10 +657,14 @@ export function Mix() {
                   const a = porId.get(c.id)
                   return (
                     <div key={c.id} className="mix-entra" style={paramCard}>
+                      <button type="button" className="mix-btn" title="tirar camada"
+                        onClick={() => alternaCamada(c.id)} style={botaoTirar}>
+                        <X size={14} />
+                      </button>
                       {/* camada 3+ cicla pelos dois papéis testados (lugar/textura), mesma
                           regra do backend — não inventa um terceiro papel */}
                       <span style={rotulo}>{PAPEL[i % PAPEL.length]}</span>
-                      <span style={{ color: 'var(--vintage-value)' }}>{a?.titulo ?? c.id}</span>
+                      <span style={{ color: 'var(--vintage-value)', paddingRight: 20 }}>{a?.titulo ?? c.id}</span>
                       <div style={{ display: 'flex', gap: 10 }}>
                         {/* -60..+12: o zero e o limiar da casa, mas o fader tem que alcancar
                             silencio de verdade — com -12 de piso uma fonte gravada quente
@@ -536,9 +684,6 @@ export function Mix() {
                         <button type="button" className="mix-btn" aria-pressed={c.respira} title="respira: leve variação de volume ao longo do loop"
                           onClick={() => ajusta(c.id, { respira: !c.respira })} style={botaoIcone(c.respira)}>
                           <Wind size={14} /> respira
-                        </button>
-                        <button type="button" className="mix-btn" title="tirar camada" onClick={() => alternaCamada(c.id)} style={botaoIcone(false)}>
-                          <X size={14} /> tirar
                         </button>
                       </div>
                     </div>
@@ -625,48 +770,6 @@ export function Mix() {
           </section>
         </div>
 
-        {/* ── o visual do loop de 1h ── */}
-        {musica && (
-          <section style={painel}>
-            <span style={rotulo}>3 · visual do loop de 1h — footage já usado no canal</span>
-            <SeletorCategorias grupoLabel="categorias do visual" todas={Object.keys(contagemVisual).sort()} contagem={contagemVisual}
-              ativos={catsVisual} onToggle={alternaCatVisual} icones={ICONE_VISUAL} rotuloVazio="categoria" />
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8,
-              maxHeight: 420, overflowY: 'auto', paddingTop: 2,
-            }}>
-              {visFiltrados.map(v => {
-                const ativo = visualId === v.id
-                return (
-                  <button key={v.id} type="button" className="mix-btn" aria-pressed={ativo} title={v.titulo}
-                    onClick={() => escolherVisual(v.id)}
-                    style={{
-                      display: 'grid', gap: 4, padding: 4, cursor: 'pointer', textAlign: 'left',
-                      background: ativo ? 'var(--vintage-surface-3)' : 'var(--vintage-surface-2)',
-                      border: `1px solid ${ativo ? 'var(--vintage-value)' : 'var(--vintage-border)'}`,
-                    }}>
-                    {v.thumb
-                      ? <img src={resolveUrl(v.thumb)} alt="" loading="lazy"
-                          style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', display: 'block' }} />
-                      : <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--vintage-surface-1)' }} />}
-                    <span style={{
-                      color: ativo ? 'var(--vintage-value)' : 'var(--vintage-label)',
-                      fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {v.titulo}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-            {visualId && (
-              <span style={{ ...rotulo, color: 'var(--vintage-text-dim)' }}>
-                escolhido: {visuais.find(v => v.id === visualId)?.titulo}
-              </span>
-            )}
-          </section>
-        )}
-
         {avisos.length > 0 && (
           <ul aria-label="avisos" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4 }}>
             {avisos.map(t => <li key={t} style={{ color: 'var(--vintage-label)' }}>⚠ {t}</li>)}
@@ -711,6 +814,50 @@ export function Mix() {
             </>
           )}
 
+          {/* mixes com nome: salvar o que está montado e reabrir depois — mesmo Popover+Command
+              do filtro de categoria, nenhum componente novo */}
+          <Popover open={mixesAbertos} onOpenChange={setMixesAbertos}>
+            <PopoverTrigger asChild>
+              <button type="button" className="mix-btn" style={botaoIcone(false)}>
+                <Save size={12} /> mixes{mixes.length > 0 ? ` (${mixes.length})` : ''}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 border-vintage-border bg-vintage-surface-2 p-0 text-vintage-label">
+              <div style={{ display: 'flex', gap: 6, padding: 10, borderBottom: '1px solid var(--vintage-border)' }}>
+                <input value={nomeMix} onChange={e => setNomeMix(e.target.value)} placeholder="nome do mix"
+                  aria-label="nome do mix" onKeyDown={e => { if (e.key === 'Enter') void salvarMix() }}
+                  style={{ ...campo, padding: '7px 9px' }} />
+                <button type="button" className="mix-btn" disabled={!musica || !nomeMix.trim()}
+                  onClick={() => void salvarMix()} style={botao(false, !musica || !nomeMix.trim())}>
+                  salvar
+                </button>
+              </div>
+              <Command className="bg-transparent">
+                <CommandInput placeholder="buscar mix" className="text-vintage-label" />
+                <CommandList>
+                  <CommandEmpty className="py-4 text-center text-xs text-vintage-text-dim">nenhum mix salvo</CommandEmpty>
+                  <CommandGroup>
+                    {mixes.map(m => (
+                      <CommandItem key={m.id} value={`${m.nome} ${m.musica}`} onSelect={() => abrirMix(m)}
+                        className="cursor-pointer gap-2 text-vintage-label data-[selected=true]:bg-vintage-surface-3 data-[selected=true]:text-vintage-value">
+                        <span style={{ flex: 1, display: 'grid', gap: 2, minWidth: 0 }}>
+                          <span>{m.nome}</span>
+                          <span className="text-vintage-text-dim" style={{ fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.musica.split(/[\\/]/).pop()} · {m.camadas.length} camadas{m.visual_id ? ' · vídeo' : ''}
+                          </span>
+                        </span>
+                        <button type="button" aria-label={`apagar mix ${m.nome}`} title="apagar mix"
+                          onClick={e => { e.stopPropagation(); void apagarMix(m.id) }} style={botaoTirar}>
+                          <Trash2 size={12} />
+                        </button>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
           {/* duração + formato eram dois grupos sempre abertos disputando espaço com o
               transporte (achado #6) — agora moram atrás de um popover, um passo de
               configuração que raramente muda dos defaults ("= música", mp3) */}
@@ -718,7 +865,8 @@ export function Mix() {
             <PopoverTrigger asChild>
               <button type="button" className="mix-btn" style={{ ...botao(false), display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Settings2 size={12} />
-                {DURACOES.find(d => d.s === duracao)?.rotulo ?? '= música'} · {formato}
+                {/* com visual o export sai .mp4 — o mp3/wav é só a faixa de áudio que vai dentro */}
+                {DURACOES.find(d => d.s === duracao)?.rotulo ?? '= música'} · {visualId ? `mp4 · áudio ${formato}` : formato}
               </button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-auto border-vintage-border bg-vintage-surface-2 p-3 text-vintage-label">
@@ -729,7 +877,8 @@ export function Mix() {
                       style={botao(duracao === d.s)}>{d.rotulo}</button>
                   ))}
                 </div>
-                <div role="group" aria-label="formato" style={{ display: 'flex', gap: 6 }}>
+                <div role="group" aria-label="formato" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {visualId && <span style={rotulo}>áudio</span>}
                   {(['mp3', 'wav'] as const).map(f => (
                     <button key={f} type="button" className="mix-btn" aria-pressed={formato === f} onClick={() => setFormato(f)}
                       style={botao(formato === f)}>{f}</button>
