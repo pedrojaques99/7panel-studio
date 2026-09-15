@@ -1,44 +1,43 @@
-' ─── 7Panel Studio + Jaques-OS ────────────────────────────────────────────────
-' Unified launcher. Kills orphan processes before starting.
-' Idempotente: rodar varias vezes nao acumula processos zombie.
+' ─── Jaques Studio — atalho ───────────────────────────────────────────────────
+' Este arquivo já foi o launcher: 60 linhas de sh.Run com WScript.Sleep fixo,
+' Stop-Process que matava só o processo pai e janelas ocultas sem log nenhum.
+'
+' Quem faz esse trabalho agora é o app Jaques Studio (Electron):
+'   • ordem por readiness real (porta escutando), não por Sleep
+'   • tree-kill na árvore inteira (cmd → npm → node), sem neto órfão na porta
+'   • log de cada serviço na janela, em vez de 13 terminais soltos
+'
+' O QUE sobe é dado, não código: Z:\Cursor\jaques-os\services.json
+' Sem janela (emergência):     cd Z:\Cursor\jaques-os && npm run services:up
+'
+' Este .vbs sobrevive só porque atalhos antigos apontam pra ele.
+' Histórico do launcher original: git log deste arquivo.
 
-Set sh = CreateObject("WScript.Shell")
+Option Explicit
+
+Dim sh, fso, i, exe, candidates
+Set sh  = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
-Dim base : base = fso.GetParentFolderName(WScript.ScriptFullName)
-Dim jaquesOs : jaquesOs = fso.GetParentFolderName(base) & "\jaques-os"
 
-' Kill orphan processes on all relevant ports (4000, 4100, 5000, 5173, 5174)
-sh.Run "powershell.exe -NoProfile -WindowStyle Hidden -Command ""@(4000,4100,5000,5173,5174) | ForEach-Object { $p=$_; netstat -ano | Select-String \"":$p\s.*LISTENING\"" | ForEach-Object { if($_ -match '\s(\d+)\s*$'){Stop-Process -Id $Matches[1] -Force -ErrorAction SilentlyContinue} } }""", 0, True
-WScript.Sleep 800
+candidates = Array( _
+    sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\jaques-studio\Jaques Studio.exe", _
+    sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Jaques Studio\Jaques Studio.exe", _
+    "Z:\Cursor\jaques-os\dist-desktop\win-unpacked\Jaques Studio.exe" _
+)
 
-' ─── 1. Launcher Hub (:4000) — sobe primeiro pra estar pronto no final ─────
-sh.Run "cmd /c cd /d """ & base & """ && python -m http.server 4000 --bind 127.0.0.1", 0, False
+exe = ""
+For i = 0 To UBound(candidates)
+    If exe = "" And fso.FileExists(candidates(i)) Then exe = candidates(i)
+Next
 
-' ─── 2. 7Panel backend (:5000) ─────────────────────────────────────────────
-sh.Run "cmd /c cd /d """ & base & "\backend"" && python dashboard_server.py", 0, False
-WScript.Sleep 2000
-
-' ─── 2b. AutoHotkey keyboard bridge (F13-F24 → Python actions) ────────────
-Dim ahk : ahk = base & "\backend\keyboard_integration.ahk"
-If fso.FileExists(ahk) Then
-    sh.Run """" & ahk & """", 0, False
+If exe = "" Then
+    MsgBox "Jaques Studio nao encontrado." & vbCrLf & vbCrLf & _
+           "Gere o instalador em Z:\Cursor\jaques-os:" & vbCrLf & _
+           "    npm run desktop:build" & vbCrLf & vbCrLf & _
+           "e rode dist-desktop\Jaques Studio Setup 1.0.0.exe.", _
+           48, "Jaques Studio"
+    WScript.Quit 1
 End If
 
-' ─── 3. YT Bot ─────────────────────────────────────────────────────────────
-sh.Run "cmd /c cd /d """ & base & "\backend"" && python yt_bot.py", 0, False
-WScript.Sleep 1000
-
-' ─── 4. 7Panel frontend (:5174) ────────────────────────────────────────────
-sh.Run "cmd /c cd /d """ & base & "\keyboard-ui"" && npm run dev", 0, False
-
-' ─── 5. Jaques-OS (:5173) ──────────────────────────────────────────────────
-sh.Run "cmd /c cd /d """ & jaquesOs & """ && npm run dev", 0, False
-
-' ─── 6. Mockup Store render server (:4200 TCP) + UI (:4100) ────────────────
-sh.Run "cmd /c cd /d ""Z:\BOXY\mockup-store"" && bun run scripts/render-server.ts", 0, False
-WScript.Sleep 3000
-sh.Run "cmd /c cd /d ""Z:\BOXY\mockup-store"" && npx next dev --port 4100", 0, False
-
-' ─── Aguarda servers subirem e abre o launcher ─────────────────────────────
-WScript.Sleep 6000
-sh.Run "cmd /c start """" ""http://localhost:4000/launcher.html""", 0, False
+' O app tem trava de instancia unica: se ja estiver aberto, isto so foca a janela.
+sh.Run """" & exe & """", 1, False

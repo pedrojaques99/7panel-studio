@@ -26,11 +26,15 @@ const BriefingPanel = React.lazy(() => import('./components/BriefingPanel').then
 
 const YouTubeChatPanel = React.lazy(() => import('./components/YouTubeChatPanel').then(m => ({ default: m.YouTubeChatPanel })))
 
+const BotPanel = React.lazy(() => import('./components/BotPanel').then(m => ({ default: m.BotPanel })))
+
 const TimerPanel = React.lazy(() => import('./components/TimerPanel').then(m => ({ default: m.TimerPanel })))
 
 const DronePanel = React.lazy(() => import('./components/DronePanel').then(m => ({ default: m.DronePanel })))
 
 const PaulstretchPanel = React.lazy(() => import('./components/PaulstretchPanel').then(m => ({ default: m.PaulstretchPanel })))
+const TriagemPanel = React.lazy(() => import('./components/TriagemPanel').then(m => ({ default: m.TriagemPanel })))
+const DomarPanel = React.lazy(() => import('./components/DomarPanel').then(m => ({ default: m.DomarPanel })))
 
 const SynthPanel = React.lazy(() => import('./components/SynthPanel').then(m => ({ default: m.SynthPanel })))
 
@@ -133,19 +137,27 @@ const IS_CLOUD = import.meta.env.VITE_DEPLOY_MODE === 'cloud'
 
 const LOCAL_ONLY_PANELS: Set<string> = new Set(['obs', 'ytchat', 'briefing'])
 
+// Streamer Focus mode — só panels de live/stream ficam disponíveis.
+const STREAM_PANELS: Set<PanelId> = new Set(['obs', 'ytchat', 'briefing', 'timer', 'bot'])
+
+export type AppMode = 'studio' | 'streamer'
 
 
-export default function App() {
+export default function App({ mode = 'studio' }: { mode?: AppMode } = {}) {
 
-  return <PanelProvider><AppInner /></PanelProvider>
+  return <PanelProvider><AppInner mode={mode} /></PanelProvider>
 
 }
 
 
 
-function AppInner() {
+function AppInner({ mode }: { mode: AppMode }) {
 
   const { scale, setScale, zOf, bringToFront, endDrag, isDragging, focusedPanel } = usePanelCtx()
+
+  // Streamer Focus: só panels de live renderizam, mesmo que o flag persistido
+  // (compartilhado com o 7Panel) esteja ligado. Gate de render abaixo.
+  const isStreamer = mode === 'streamer'
 
   const transformRef = useRef<ReactZoomPanPinchRef>(null)
   const focusedPanelRef = useRef<string | null>(null)
@@ -178,11 +190,15 @@ function AppInner() {
 
   const [showYTChat, setShowYTChat] = useState(() => localStorage.getItem('panel-ytchat') === 'true')
 
+  const [showBot, setShowBot] = useState(() => localStorage.getItem('panel-bot') === 'true')
+
   const [showTimer, setShowTimer] = useState(() => localStorage.getItem('panel-timer') === 'true')
 
   const [showDrone, setShowDrone] = useState(() => localStorage.getItem('panel-drone') === 'true')
 
   const [showPaul, setShowPaul] = useState(() => localStorage.getItem('panel-paul') === 'true')
+  const [showTriagem, setShowTriagem] = useState(() => localStorage.getItem('panel-triagem') === 'true')
+  const [showDomar, setShowDomar] = useState(() => localStorage.getItem('panel-domar') === 'true')
 
   const [synthIds, setSynthIds] = useState<string[]>(() => {
 
@@ -383,6 +399,28 @@ function AppInner() {
 
 
 
+  /* â"€â"€ Streamer Focus: layout default aplicado 1x na 1ª carga do modo â"€â"€ */
+  useEffect(() => {
+    if (mode !== 'streamer') return
+    if (localStorage.getItem('streamer-initialized') === 'true') return
+    localStorage.setItem('streamer-initialized', 'true')
+    // Cockpit de live: OBS + Briefing à esquerda, Chat à direita, Bot + Timer embaixo.
+    const layout: Record<string, { x: number; y: number; w?: number; h?: number }> = {
+      obs:      { x: 40,   y: 40 },
+      briefing: { x: 300,  y: 40,  w: 380, h: 620 },
+      ytchat:   { x: 720,  y: 40 },
+      bot:      { x: 40,   y: 400 },
+      timer:    { x: 300,  y: 680 },
+    }
+    for (const [key, geo] of Object.entries(layout)) saveGeo(key, geo)
+    setShowOBS(true)
+    setShowBriefing(true)
+    setShowYTChat(true)
+    setShowBot(true)
+    setShowTimer(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
   // Persist visibilidade â€" 1 useEffect por chave evita 11 setItem por toggle.
 
   useEffect(() => { localStorage.setItem('panel-keys', String(showKeys)) }, [showKeys])
@@ -398,11 +436,15 @@ function AppInner() {
 
   useEffect(() => { localStorage.setItem('panel-ytchat', String(showYTChat)) }, [showYTChat])
 
+  useEffect(() => { localStorage.setItem('panel-bot', String(showBot)) }, [showBot])
+
   useEffect(() => { localStorage.setItem('panel-timer', String(showTimer)) }, [showTimer])
 
   useEffect(() => { localStorage.setItem('panel-drone', String(showDrone)) }, [showDrone])
 
   useEffect(() => { localStorage.setItem('panel-paul', String(showPaul)) }, [showPaul])
+  useEffect(() => { localStorage.setItem('panel-triagem', String(showTriagem)) }, [showTriagem])
+  useEffect(() => { localStorage.setItem('panel-domar', String(showDomar)) }, [showDomar])
 
   useEffect(() => { localStorage.setItem('panel-synth', String(showSynth)); localStorage.setItem('panel-synth-ids', JSON.stringify(synthIds)) }, [synthIds])
 
@@ -639,6 +681,7 @@ function AppInner() {
     obs: 'obs', briefing: 'briefing', ytchat: 'ytchat',
 
     timer: 'timer', drone: 'drone', paul: 'paulstretch',
+    triagem: 'triagem', domar: 'domar',
 
     exporter: 'exporter', converter: 'converter', looplab: 'looplab', drummachine: 'drummachine',
 
@@ -668,9 +711,10 @@ function AppInner() {
 
       keys: setShowKeys, mixer: setShowMixer, soundboard: setShowSoundboard,
 
-      obs: setShowOBS, briefing: setShowBriefing, ytchat: setShowYTChat,
+      obs: setShowOBS, briefing: setShowBriefing, ytchat: setShowYTChat, bot: setShowBot,
 
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, synth: setShowSynth,
+      triagem: setShowTriagem, domar: setShowDomar,
 
       exporter: setShowExporter, converter: setShowConverter, looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession, visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer, analogbrain: setShowAnalogBrain,
 
@@ -732,8 +776,9 @@ function AppInner() {
     if (!fp) return
     const setters: Record<string, React.Dispatch<React.SetStateAction<boolean>>> = {
       keys: setShowKeys, keyboard: setShowKeys, mixer: setShowMixer, soundboard: setShowSoundboard,
-      obs: setShowOBS, briefing: setShowBriefing, ytchat: setShowYTChat,
+      obs: setShowOBS, briefing: setShowBriefing, ytchat: setShowYTChat, bot: setShowBot,
       timer: setShowTimer, drone: setShowDrone, paul: setShowPaul, paulstretch: setShowPaul,
+      triagem: setShowTriagem, domar: setShowDomar,
       synth: setShowSynth, exporter: setShowExporter, converter: setShowConverter,
       looplab: setShowLoopLab, drummachine: setShowDrumMachine, session: setShowSession,
       visualizer: setShowVisualizer, retrotv: setShowRetroTV, ytdl: setShowYTDL, audioplayer: setShowAudioPlayer, synesthizer: setShowSynesthizer,
@@ -896,7 +941,10 @@ function AppInner() {
 
 
 
-  const panelDefs: PanelDef[] = useMemo(() => [
+  // useMemo<PanelDef[]> e nao `const x: PanelDef[] = useMemo(...)`: o `.filter()`
+  // encadeado depois corta a tipagem contextual, e sem ela o TS alarga cada `id`
+  // literal pra `string`. Era o que fazia `p.id` nao ser PanelId mais abaixo.
+  const panelDefs: PanelDef[] = useMemo<PanelDef[]>(() => [
 
     { id: 'keys',       label: 'Keyboard',       icon: '🎹', sidebar: isSidebarVisible('keys', true),        visible: showKeys },
 
@@ -908,6 +956,8 @@ function AppInner() {
 
     { id: 'ytchat',     label: 'YouTube Chat',   icon: '💬', sidebar: isSidebarVisible('ytchat', true),      visible: showYTChat },
 
+    { id: 'bot',        label: 'Chat Bot',       icon: '🤖', sidebar: isSidebarVisible('bot', true),         visible: showBot },
+
     { id: 'timer',      label: 'Timer',          icon: '⏰', sidebar: isSidebarVisible('timer', true),       visible: showTimer },
 
     { id: 'briefing',   label: 'Briefing',       icon: '📋', sidebar: isSidebarVisible('briefing', false),   visible: showBriefing },
@@ -917,6 +967,8 @@ function AppInner() {
     { id: 'drone',      label: 'Drone',          icon: '🌊', sidebar: isSidebarVisible('drone', false),      visible: showDrone },
 
     { id: 'paul',       label: 'Paulstretch',    icon: '🔊', sidebar: isSidebarVisible('paul', false),       visible: showPaul },
+    { id: 'triagem',    label: 'Triagem',        icon: '🎚️', sidebar: isSidebarVisible('triagem', false),    visible: showTriagem },
+    { id: 'domar',      label: 'Domar',          icon: '🪶', sidebar: isSidebarVisible('domar', false),      visible: showDomar },
 
     { id: 'synth',      label: 'Synth',          icon: '🎶', sidebar: isSidebarVisible('synth', true),       visible: showSynth },
 
@@ -941,7 +993,9 @@ function AppInner() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
 
-  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showTimer, showDrone, showPaul, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, showSynesthizer, showAnalogBrain, sidebarConfig]).filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
+  ], [showKeys, showMixer, showSoundboard, showOBS, showBriefing, showYTChat, showBot, showTimer, showDrone, showPaul, showTriagem, showDomar, showSynth, showExporter, showConverter, showLoopLab, showDrumMachine, showSession, showVisualizer, showRetroTV, showYTDL, showAudioPlayer, showSynesthizer, showAnalogBrain, sidebarConfig])
+    .filter(p => !IS_CLOUD || !LOCAL_ONLY_PANELS.has(p.id))
+    .filter(p => mode !== 'streamer' || STREAM_PANELS.has(p.id))
 
 
 
@@ -1382,7 +1436,7 @@ function AppInner() {
 
               {/* Mixer mini â€" fixed outside canvas */}
 
-              {showMixer && mixerMinimized && (
+              {showMixer && mixerMinimized && !isStreamer && (
 
                 <div className="fixed bottom-6 right-6 z-[100]" style={{ width: 320 }}>
 
@@ -1488,7 +1542,7 @@ function AppInner() {
 
         {/* Keyboard panel */}
 
-        {showKeys && (
+        {showKeys && !isStreamer && (
 
           <Rnd
 
@@ -1762,7 +1816,7 @@ const action = config.buttons?.[key] || {} as any
 
         {/* Mixer panel â€" full mode inside canvas */}
 
-        {showMixer && !mixerMinimized && (
+        {showMixer && !mixerMinimized && !isStreamer && (
 
           <Rnd
 
@@ -1842,7 +1896,7 @@ const action = config.buttons?.[key] || {} as any
 
         {/* Soundboard panel */}
 
-        {showSoundboard && <ErrorBoundary><SoundboardPanel onClose={() => setShowSoundboard(false)} onChannelChange={setSbChannels} /></ErrorBoundary>}
+        {!isStreamer && showSoundboard && <ErrorBoundary><SoundboardPanel onClose={() => setShowSoundboard(false)} onChannelChange={setSbChannels} /></ErrorBoundary>}
 
 
 
@@ -1854,35 +1908,39 @@ const action = config.buttons?.[key] || {} as any
 
         {showYTChat && <ErrorBoundary><YouTubeChatPanel onClose={() => setShowYTChat(false)} /></ErrorBoundary>}
 
+        {showBot && <ErrorBoundary><BotPanel onClose={() => setShowBot(false)} /></ErrorBoundary>}
+
         {showTimer && <ErrorBoundary><TimerPanel onClose={() => setShowTimer(false)} /></ErrorBoundary>}
 
-        {showDrone && <ErrorBoundary><DronePanel onClose={() => setShowDrone(false)} /></ErrorBoundary>}
+        {!isStreamer && showDrone && <ErrorBoundary><DronePanel onClose={() => setShowDrone(false)} /></ErrorBoundary>}
 
-        {showPaul && <ErrorBoundary><PaulstretchPanel onClose={() => setShowPaul(false)} /></ErrorBoundary>}
+        {!isStreamer && showPaul && <ErrorBoundary><PaulstretchPanel onClose={() => setShowPaul(false)} /></ErrorBoundary>}
+        {!isStreamer && showTriagem && <ErrorBoundary><TriagemPanel onClose={() => setShowTriagem(false)} /></ErrorBoundary>}
+        {!isStreamer && showDomar && <ErrorBoundary><DomarPanel onClose={() => setShowDomar(false)} /></ErrorBoundary>}
 
-        {synthIds.map(id => <ErrorBoundary key={id}><SynthPanel instanceId={id} onClose={() => setSynthIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
+        {!isStreamer && synthIds.map(id => <ErrorBoundary key={id}><SynthPanel instanceId={id} onClose={() => setSynthIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
 
-        {showExporter && <ErrorBoundary><ExporterPanel onClose={() => setShowExporter(false)} /></ErrorBoundary>}
+        {!isStreamer && showExporter && <ErrorBoundary><ExporterPanel onClose={() => setShowExporter(false)} /></ErrorBoundary>}
 
-        {showConverter && <ErrorBoundary><ConverterPanel onClose={() => setShowConverter(false)} /></ErrorBoundary>}
+        {!isStreamer && showConverter && <ErrorBoundary><ConverterPanel onClose={() => setShowConverter(false)} /></ErrorBoundary>}
 
-        {showYTDL && <ErrorBoundary><YTDownloadPanel onClose={() => setShowYTDL(false)} /></ErrorBoundary>}
+        {!isStreamer && showYTDL && <ErrorBoundary><YTDownloadPanel onClose={() => setShowYTDL(false)} /></ErrorBoundary>}
 
-        {showLoopLab && <ErrorBoundary><LoopLabPanel onClose={() => setShowLoopLab(false)} /></ErrorBoundary>}
+        {!isStreamer && showLoopLab && <ErrorBoundary><LoopLabPanel onClose={() => setShowLoopLab(false)} /></ErrorBoundary>}
 
-        {drumIds.map(id => <ErrorBoundary key={id}><DrumMachinePanel instanceId={id} onClose={() => setDrumIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
+        {!isStreamer && drumIds.map(id => <ErrorBoundary key={id}><DrumMachinePanel instanceId={id} onClose={() => setDrumIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
 
-        {showSession && <ErrorBoundary><SessionPanel onClose={() => setShowSession(false)} /></ErrorBoundary>}
+        {!isStreamer && showSession && <ErrorBoundary><SessionPanel onClose={() => setShowSession(false)} /></ErrorBoundary>}
 
-        {showVisualizer && <ErrorBoundary><VisualizerPanel onClose={() => setShowVisualizer(false)} /></ErrorBoundary>}
+        {!isStreamer && showVisualizer && <ErrorBoundary><VisualizerPanel onClose={() => setShowVisualizer(false)} /></ErrorBoundary>}
 
-        {retroTVIds.map(id => <ErrorBoundary key={id}><RetroTVPanel instanceId={id} onClose={() => setRetroTVIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
+        {!isStreamer && retroTVIds.map(id => <ErrorBoundary key={id}><RetroTVPanel instanceId={id} onClose={() => setRetroTVIds(prev => prev.filter(x => x !== id))} /></ErrorBoundary>)}
 
-        {showAudioPlayer && <ErrorBoundary><AudioPlayerPanel onClose={() => setShowAudioPlayer(false)} /></ErrorBoundary>}
+        {!isStreamer && showAudioPlayer && <ErrorBoundary><AudioPlayerPanel onClose={() => setShowAudioPlayer(false)} /></ErrorBoundary>}
 
-        {showSynesthizer && <ErrorBoundary><SynesthizerPanel onClose={() => setShowSynesthizer(false)} /></ErrorBoundary>}
+        {!isStreamer && showSynesthizer && <ErrorBoundary><SynesthizerPanel onClose={() => setShowSynesthizer(false)} /></ErrorBoundary>}
 
-        {showAnalogBrain && <ErrorBoundary><AnalogBrainPanel onClose={() => setShowAnalogBrain(false)} /></ErrorBoundary>}
+        {!isStreamer && showAnalogBrain && <ErrorBoundary><AnalogBrainPanel onClose={() => setShowAnalogBrain(false)} /></ErrorBoundary>}
 
                 </div>
 
@@ -1900,7 +1958,7 @@ const action = config.buttons?.[key] || {} as any
 
         <PresetFloating
 
-          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, drummachine: showDrumMachine, session: showSession, visualizer: showVisualizer, retrotv: showRetroTV, ytdl: showYTDL, audioplayer: showAudioPlayer, synesthizer: showSynesthizer }}
+          visibility={{ keys: showKeys, mixer: showMixer, soundboard: showSoundboard, obs: showOBS, briefing: showBriefing, ytchat: showYTChat, timer: showTimer, drone: showDrone, paul: showPaul, triagem: showTriagem, domar: showDomar, synth: showSynth, exporter: showExporter, converter: showConverter, looplab: showLoopLab, drummachine: showDrumMachine, session: showSession, visualizer: showVisualizer, retrotv: showRetroTV, ytdl: showYTDL, audioplayer: showAudioPlayer, synesthizer: showSynesthizer }}
 
           scale={scale}
 

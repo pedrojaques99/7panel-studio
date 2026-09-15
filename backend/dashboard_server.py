@@ -320,80 +320,64 @@ def yt_stream():
     return Response(stream_with_context(generate()), status=status, headers=headers)
 
 
-# ── Paulstretch ──────────────────────────────────────────────────────────────
+# ── Paulstretch ──────────────────────────────────────────────
 
-def _paulstretch(samplerate, snd, stretch, window_sec=0.25):
-    """
-    Paulstretch by Nasca Octavian Paul — Python port.
-    snd: float32 numpy array, shape (samples,) or (samples, channels)
-    stretch: float > 1, e.g. 8.0 = 8× slower
-    window_sec: analysis window in seconds; larger = dreamier
-    """
-    import numpy as np
-    from numpy.fft import rfft, irfft
-
-    mono = snd.ndim == 1
-    if mono:
-        snd = snd[:, np.newaxis]
-    nsamples, nch = snd.shape
-
-    win_size = max(16, int(window_sec * samplerate))
-    if win_size % 2:
-        win_size += 1
-    half = win_size // 2
-
-    # Hann window — applied twice (analysis + synthesis) = effective Hann²
-    window = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(win_size) / win_size)
-    window = window.astype(np.float32)
-
-    in_step  = half / stretch          # input hop (can be fractional)
-    out_step = half                    # output hop
-
-    out_len  = int(nsamples / in_step * out_step) + win_size * 2
-    result   = np.zeros((out_len, nch), dtype=np.float32)
-
-    in_pos  = 0.0
-    out_pos = 0
-
-    while True:
-        i0 = int(in_pos)
-        if i0 + win_size > nsamples:
-            break
-        frame = snd[i0:i0 + win_size, :].copy()
-
-        for ch in range(nch):
-            seg = frame[:, ch] * window
-            freq = rfft(seg)
-            mag  = np.abs(freq)
-            # randomise phases — the core Paulstretch magic
-            phase = np.random.uniform(0.0, 2 * np.pi, len(freq)).astype(np.float32)
-            freq  = mag * np.exp(1j * phase)
-            out   = irfft(freq).astype(np.float32) * window
-            result[out_pos:out_pos + win_size, ch] += out
-
-        in_pos  += in_step
-        out_pos += out_step
-
-    result = result[:out_pos + win_size]
-    peak = np.max(np.abs(result))
-    if peak > 0:
-        result *= 0.92 / peak
-    return result[:, 0] if mono else result
+# Aqui morava uma SEGUNDA implementacao do Paulstretch, com `out_step = half`
+# (overlap=2). A CLI de `Jacao Ambients/_tools/` rodava overlap=4. Medido:
+# 9,03 dB de ripple contra 0,25 dB — tremolo de 8 Hz em todo render feito pela UI.
+#
+# A copia foi removida. O motor agora mora em `dsp/paulstretch.py`, unico, e
+# `tests/test_divergencia.py` falha se ele divergir da CLI.
+from dsp.paulstretch import paulstretch as _paulstretch, fator_efetivo
 
 
 @app.route('/api/duration', methods=['GET'])
 def get_duration():
-    import subprocess, json as _json
+    import subprocess, json as _json, re
     path = request.args.get('path', '').strip()
     if not path or not os.path.exists(path):
         return jsonify({'error': 'file not found'}), 400
     try:
         r = subprocess.run(
-            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', path],
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+             '-show_format', '-show_streams', path],
             capture_output=True, timeout=10
         )
         info = _json.loads(r.stdout)
-        duration = float(info['format']['duration'])
+
+        # webm de MediaRecorder NAO traz duracao: o container e escrito em stream e
+        # o header sai sem `format.duration`. Toda gravacao da /fabrica caia aqui e a
+        # tela ficava sem o unico numero que ela mostra. Tres tentativas, da mais
+        # barata pra mais cara.
+        duration = None
+        try:
+            duration = float(info.get('format', {}).get('duration'))
+        except (TypeError, ValueError):
+            pass
+
+        if duration is None:
+            for st in info.get('streams', []):
+                try:
+                    duration = float(st.get('duration'))
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+        if duration is None:
+            # ultimo recurso: decodifica pra nada e le o tempo final do ffmpeg.
+            # Custa um passe de decode, e so acontece em arquivo sem duracao no header.
+            d = subprocess.run(
+                ['ffmpeg', '-i', path, '-f', 'null', '-'],
+                capture_output=True, timeout=120
+            )
+            err = (d.stderr or b'').decode('utf-8', 'replace')
+            m = re.findall(r'time=(\d+):(\d+):(\d+(?:\.\d+)?)', err)
+            if m:
+                h, mi, sec = m[-1]
+                duration = int(h) * 3600 + int(mi) * 60 + float(sec)
+
+        if duration is None:
+            return jsonify({'error': 'sem duracao no arquivo'}), 500
         return jsonify({'duration': duration})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -422,8 +406,20 @@ def stretch_audio():
     trim_tag = f'|{trim_start}-{trim_end}' if (trim_start or trim_end) else ''
     key      = hashlib.md5(f'{path}|{factor}|{window}{trim_tag}'.encode()).hexdigest()[:14]
     out_path = os.path.join(assets_dir, f'ps_{key}.wav')
+    meta_path = out_path[:-4] + '.json'
     if os.path.exists(out_path):
-        return jsonify({'path': out_path})
+        # O fator efetivo vem do sidecar, nao de recalcular: no acerto de cache o
+        # audio nao foi decodificado, entao `len(audio)` nao existe aqui. Sem isto
+        # um render que saiu CURTO (fonte de 1 s pedindo 12x entrega 6,62x) perdia o
+        # aviso pra sempre a partir da segunda vez — a UI mostrava o alerta uma vez e
+        # nunca mais, que e pior do que nunca ter mostrado.
+        resp = {'path': out_path}
+        try:
+            with open(meta_path, encoding='utf-8') as fh:
+                resp.update(json.load(fh))
+        except (OSError, ValueError):
+            pass          # render antigo, anterior ao sidecar: responde sem o aviso
+        return jsonify(resp)
 
     # decode input to PCM WAV via ffmpeg — apply trim if requested
     tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
@@ -453,7 +449,22 @@ def stretch_audio():
 
         out_int16 = np.clip(stretched * 32767, -32768, 32767).astype(np.int16)
         wavfile.write(out_path, sr, out_int16)
-        return jsonify({'path': out_path})
+        # O fator pedido quase nunca e o entregue: a ultima janela precisa caber
+        # inteira, entao fonte curta estica menos (1 s com janela 0,5 s pedindo 12x
+        # devolve 6,62x). A conta NAO foi mexida — todos os renders aprovados do
+        # acervo sairam assim. Aqui so se avisa, pra UI poder mostrar.
+        real, _prev, _win = fator_efetivo(len(audio), sr, factor, window)
+        aviso = {'fator_pedido': factor, 'fator_real': round(real, 2),
+                 'fator_ok': abs(real - factor) <= factor * 0.05}
+        # Sidecar: no proximo acerto de cache o audio nao sera decodificado e
+        # `len(audio)` nao existira. Sem gravar aqui, o aviso de fator curto some
+        # a partir da segunda chamada.
+        try:
+            with open(meta_path, 'w', encoding='utf-8') as fh:
+                json.dump(aviso, fh)
+        except OSError:
+            pass          # sidecar e conveniencia; nao pode derrubar o render
+        return jsonify({'path': out_path, **aviso})
 
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'ffmpeg timed out'}), 500
@@ -462,6 +473,99 @@ def stretch_audio():
     finally:
         try: os.unlink(tmp.name)
         except: pass
+
+
+# ── Triagem e Domar ──────────────────────────────────────────────────────────
+#
+# A esteira e SEED -> TRIAGEM -> ESTICAR -> DOMAR. A triagem existe porque medir
+# custa segundos e esticar custa horas: 60 das 331 faixas do acervo reprovam NA
+# FONTE, e todo render gasto nelas foi tempo jogado fora.
+
+@app.route('/api/triagem', methods=['POST'])
+def api_triagem():
+    """Mede a fonte antes de gastar render. Devolve os 4 portoes + destino + receita."""
+    from dsp.medidas import triar
+
+    body = request.get_json(silent=True) or {}
+    path = (body.get('path') or '').strip()
+    if not path:
+        return jsonify({'error': 'informe path'}), 400
+    if not os.path.exists(path):
+        return jsonify({'error': 'file not found: %s' % path}), 404
+    try:
+        return jsonify(triar(path))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+_domar_jobs = {}
+
+
+def _run_domar(job_id, kw):
+    from dsp.domar import domar
+    job = _domar_jobs[job_id]
+    try:
+        job.update(domar(**kw))
+        job['status'] = 'done'
+        job['progress'] = 100
+    except Exception as e:
+        job['status'] = 'error'
+        job['error'] = str(e)
+
+
+@app.route('/api/domar', methods=['POST'])
+def api_domar():
+    """Conserta a cama depois de esticar: notch -> shelf escuro -> teto -> achatar -> limiter.
+
+    Sempre mede antes E depois — correcao so entra com numero dos dois lados. Render
+    de cama longa demora minutos, entao roda em job; `so_medir` responde na hora.
+    """
+    import threading, uuid
+
+    body = request.get_json(silent=True) or {}
+    path = (body.get('path') or '').strip()
+    if not path:
+        return jsonify({'error': 'informe path'}), 400
+    if not os.path.exists(path):
+        return jsonify({'error': 'file not found: %s' % path}), 404
+
+    kw = {'entrada': path, 'so_medir': bool(body.get('so_medir'))}
+    # Os quatro ultimos sao a camada de GOSTO da rota /eq (grave e reverb). Todos
+    # default 0/desligado no `domar()`, entao chamada que nao os manda sai identica
+    # ao que saia antes deles existirem.
+    for k, conv in (('alvo_faixa', float), ('limiar_pico', float), ('corte_pico', float),
+                    ('escuro_hz', float), ('escuro_db', float), ('teto_hz', float),
+                    ('forca', float), ('alvo_lufs', float), ('achatar', bool),
+                    ('grave_db', float), ('grave_hz', float),
+                    ('reverb_wet', float), ('reverb_decay', float)):
+        if body.get(k) is not None:
+            kw[k] = conv(body[k])
+
+    if kw['so_medir']:
+        from dsp.domar import domar
+        try:
+            return jsonify(domar(**kw))
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    saida = (body.get('out') or '').strip()
+    if not saida:
+        base, _ext = os.path.splitext(path)
+        saida = base + '_domado.mp3'
+    kw['saida'] = saida
+
+    job_id = uuid.uuid4().hex[:12]
+    _domar_jobs[job_id] = {'status': 'running', 'progress': 0, 'out': saida}
+    threading.Thread(target=_run_domar, args=(job_id, kw), daemon=True).start()
+    return jsonify({'job_id': job_id, 'status': 'running', 'out': saida})
+
+
+@app.route('/api/domar/status/<job_id>', methods=['GET'])
+def api_domar_status(job_id):
+    job = _domar_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    return jsonify(job)
 
 
 _ytdl_jobs = {}
@@ -609,52 +713,124 @@ def list_assets():
 
 
 # ── Strudel samples map ─────────────────────────────────────────────────────
+#
+# O sintoma que esta secao tem que parar de produzir: SILENCIO SEM RECADO.
+# Quando alguma coisa aqui falha, o take toca, o relogio anda, a linha do tempo
+# desenha — e nao sai som. Quem nao e dev procura o defeito no volume.
+#
+# Duas armadilhas ja pagas, documentadas pra nao voltarem:
+#
+# 1. As raizes permitidas eram preenchidas DENTRO de `/strudel-map`. Um reload
+#    do servidor com a aba ja aberta deixava `/samples/file` respondendo 403 em
+#    tudo ate alguem pedir o mapa de novo — e 403 em audio nao aparece em lugar
+#    nenhum, so some o som. Agora saem do import, junto com o processo.
+#
+# 2. A varredura anda 21 bancos / centenas de arquivos a cada chamada. Lenta o
+#    bastante pra a aba desistir antes da resposta em disco frio. Agora tem
+#    cache com TTL e `?fresh=1` pra forcar.
 
 EXTRA_SAMPLE_DIRS = [
     os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'auto-video-editor-ai', 'scripts', '.render-assets', 'ambient')),
 ]
 
-_ALLOWED_SAMPLE_ROOTS: list = []  # populated once in strudel_sample_map
+SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets', 'samples'))
+
+# Calculado no IMPORT, nao numa rota: ver armadilha 1 acima.
+_ALLOWED_SAMPLE_ROOTS = [SAMPLES_DIR] + [os.path.abspath(d) for d in EXTRA_SAMPLE_DIRS]
+
+AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.flac', '.webm', '.m4a'}
+
+_sample_map_cache = {'quando': 0.0, 'mapa': None}
+SAMPLE_MAP_TTL = 60.0  # s
+
+
+def _walk_sample_dir(base_dir, result, prefix=''):
+    """Uma pasta com audio = um banco. Nome do banco = caminho relativo em slug."""
+    import re
+    if not os.path.isdir(base_dir):
+        return
+    for root, _dirs, filenames in os.walk(base_dir):
+        audio_files = sorted(
+            f for f in filenames
+            if os.path.splitext(f)[1].lower() in AUDIO_EXTS
+        )
+        if not audio_files:
+            continue
+        rel = os.path.relpath(root, base_dir).replace(os.sep, '/')
+        slug = re.sub(r'[^a-zA-Z0-9]+', '_', rel).strip('_').lower()
+        if not slug or slug == '.':
+            slug = prefix or 'local'
+        elif prefix:
+            slug = f'{prefix}_{slug}'
+        result[slug] = [os.path.abspath(os.path.join(root, f)) for f in audio_files]
+
+
+def _build_sample_map():
+    result = {}
+    _walk_sample_dir(SAMPLES_DIR, result)
+    for extra in EXTRA_SAMPLE_DIRS:
+        _walk_sample_dir(extra, result, 'ambient')
+    return result
+
+
+def _sample_map(fresh=False):
+    import time
+    agora = time.time()
+    fresco = agora - _sample_map_cache['quando'] < SAMPLE_MAP_TTL
+    if not fresh and _sample_map_cache['mapa'] is not None and fresco:
+        return _sample_map_cache['mapa']
+    mapa = _build_sample_map()
+    _sample_map_cache['mapa'] = mapa
+    _sample_map_cache['quando'] = agora
+    return mapa
+
 
 @app.route('/api/samples/strudel-map', methods=['GET'])
 def strudel_sample_map():
-    import re
-    AUDIO_EXTS = {'.wav', '.mp3', '.ogg', '.flac', '.webm', '.m4a'}
-    result = {}
+    fresh = request.args.get('fresh', '') in ('1', 'true', 'yes')
+    return jsonify(_sample_map(fresh=fresh))
 
-    def walk_dir(base_dir, prefix=''):
-        if not os.path.isdir(base_dir):
-            return
-        for root, _dirs, filenames in os.walk(base_dir):
-            audio_files = sorted(
-                f for f in filenames
-                if os.path.splitext(f)[1].lower() in AUDIO_EXTS
-            )
-            if not audio_files:
-                continue
-            rel = os.path.relpath(root, base_dir).replace('\\', '/')
-            slug = re.sub(r'[^a-zA-Z0-9]+', '_', rel).strip('_').lower()
-            if not slug or slug == '.':
-                slug = prefix or 'local'
-            elif prefix:
-                slug = f'{prefix}_{slug}'
-            urls = []
-            for f in audio_files:
-                abs_path = os.path.abspath(os.path.join(root, f))
-                urls.append(abs_path)
-            result[slug] = urls
 
-    samples_dir = os.path.join(os.path.dirname(__file__), 'assets', 'samples')
-    walk_dir(samples_dir)
-    for extra in EXTRA_SAMPLE_DIRS:
-        walk_dir(extra, 'ambient')
+@app.route('/api/samples/health', methods=['GET'])
+def samples_health():
+    """
+    Por que o banco esta vazio — em portugues, pra tela poder repetir.
 
-    _ALLOWED_SAMPLE_ROOTS.clear()
-    _ALLOWED_SAMPLE_ROOTS.append(os.path.abspath(samples_dir))
-    for extra in EXTRA_SAMPLE_DIRS:
-        _ALLOWED_SAMPLE_ROOTS.append(os.path.abspath(extra))
-
-    return jsonify(result)
+    Existe porque "o backend devolveu um mapa vazio" nao e diagnostico: pode ser
+    pasta que nao existe, pasta vazia, ou disco fora do ar. Sao consertos
+    diferentes, e sem nomear qual e a pessoa so tem a opcao de chutar. Quem
+    responde essa pergunta e quem tem o disco na mao, que e este processo.
+    """
+    mapa = _sample_map(fresh=request.args.get('fresh', '') in ('1', 'true', 'yes'))
+    arquivos = sum(len(v) for v in mapa.values())
+    raizes, avisos = [], []
+    for raiz in _ALLOWED_SAMPLE_ROOTS:
+        existe = os.path.isdir(raiz)
+        # Conta por raiz varrendo SO ela: dizer "243 bancos" nao ajuda quem
+        # precisa saber QUAL das duas pastas sumiu.
+        proprio = {}
+        if existe:
+            _walk_sample_dir(raiz, proprio)
+        raizes.append({
+            'caminho': raiz,
+            'existe': existe,
+            'bancos': len(proprio),
+            'arquivos': sum(len(v) for v in proprio.values()),
+        })
+        if not existe:
+            avisos.append(f'a pasta {raiz} nao existe neste computador')
+        elif not proprio:
+            avisos.append(f'a pasta {raiz} existe mas nao tem nenhum audio dentro')
+    if not mapa:
+        avisos.append('nenhuma pasta com audio foi encontrada — o take vai tocar mudo')
+    return jsonify({
+        'ok': bool(mapa) and not avisos,
+        'bancos': len(mapa),
+        'arquivos': arquivos,
+        'raizes': raizes,
+        'avisos': avisos,
+        'cache_em_segundos': SAMPLE_MAP_TTL,
+    })
 
 
 @app.route('/api/samples/file', methods=['GET'])
@@ -663,10 +839,7 @@ def serve_sample_file():
     if not path or not os.path.isfile(path):
         return jsonify({'error': 'not found'}), 404
     abs_path = os.path.abspath(path)
-    allowed_roots = _ALLOWED_SAMPLE_ROOTS if _ALLOWED_SAMPLE_ROOTS else [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets', 'samples'))
-    ]
-    if not any(abs_path.startswith(root) for root in allowed_roots):
+    if not any(abs_path.startswith(root) for root in _ALLOWED_SAMPLE_ROOTS):
         return jsonify({'error': 'forbidden'}), 403
     ext = os.path.splitext(path)[1].lower()
     mime = {
@@ -1101,6 +1274,407 @@ def poll_key_event():
             time.sleep(0.05)
     return jsonify({})
 
+# ── Jam bridge (Claude Code CLI ↔ AnalogBrain) ───────────────────────────────
+# Revisão numerada + poll. Ninguém sobrescreve ninguém: push só incrementa rev,
+# quem decide o que toca é sempre o painel.
+_JAM_FILE = os.path.join(os.path.dirname(__file__), 'jam_session.json')
+_PATTERNS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'patterns'))
+_JAM_LOG_MAX = 50
+_jam_lock = threading.Lock()
+
+_jam_state = {
+    'rev': 0,
+    'code': '',
+    'author': 'user',
+    'message': '',
+    'bpm': 120,
+    'playing': False,
+    'error': None,
+    'accepted_rev': 0,
+    'prop_bpm': 0,
+    'ts': 0.0,
+}
+_jam_log: list = []
+
+
+def _jam_load():
+    try:
+        with open(_JAM_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        _jam_state.update(data.get('state', {}))
+        _jam_log[:] = data.get('log', [])[-_JAM_LOG_MAX:]
+    except Exception:
+        pass
+
+
+def _jam_persist():
+    try:
+        with open(_JAM_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'state': _jam_state, 'log': _jam_log}, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_jam_load()
+
+
+@app.route('/api/jam/state', methods=['GET'])
+def jam_state():
+    """Estado atual da jam. Painel faz poll; CLI lê via jam.py get."""
+    with _jam_lock:
+        return jsonify(dict(_jam_state))
+
+
+@app.route('/api/jam/push', methods=['POST'])
+def jam_push():
+    """Nova revisão. author='claude' entra como proposta, não sobrescreve o editor."""
+    import time
+    data = request.json or {}
+    code = data.get('code', '')
+    if not str(code).strip():
+        return jsonify({'error': 'code vazio'}), 400
+    author = 'claude' if data.get('author') == 'claude' else 'user'
+    with _jam_lock:
+        _jam_state['rev'] += 1
+        _jam_state['code'] = code
+        _jam_state['author'] = author
+        _jam_state['message'] = data.get('message', '')
+        _jam_state['ts'] = time.time()
+        if data.get('bpm'):
+            if author == 'claude':
+                _jam_state['prop_bpm'] = int(data['bpm'])
+            else:
+                _jam_state['bpm'] = int(data['bpm'])
+        elif author == 'claude':
+            _jam_state['prop_bpm'] = 0
+        # revisão nova = erro antigo não vale mais
+        _jam_state['error'] = None
+        if author == 'user':
+            _jam_state['accepted_rev'] = _jam_state['rev']
+        _jam_log.append({
+            'rev': _jam_state['rev'],
+            'author': author,
+            'message': _jam_state['message'],
+            'code': code,
+            'ts': _jam_state['ts'],
+        })
+        del _jam_log[:-_JAM_LOG_MAX]
+        _jam_persist()
+        return jsonify({'status': 'ok', 'rev': _jam_state['rev']})
+
+
+@app.route('/api/jam/feedback', methods=['POST'])
+def jam_feedback():
+    """Painel devolve resultado do eval — é isso que me deixa consertar sintaxe."""
+    data = request.json or {}
+    with _jam_lock:
+        for k in ('error', 'playing', 'bpm', 'accepted_rev'):
+            if k in data:
+                _jam_state[k] = data[k]
+        _jam_persist()
+        return jsonify({'status': 'ok'})
+
+
+@app.route('/api/jam/log', methods=['GET'])
+def jam_log():
+    n = max(1, min(int(request.args.get('n', 20)), _JAM_LOG_MAX))
+    full = request.args.get('code') == '1'
+    with _jam_lock:
+        items = _jam_log[-n:]
+        if not full:
+            items = [{k: v for k, v in it.items() if k != 'code'} for it in items]
+        return jsonify(list(reversed(items)))
+
+
+def _pattern_path(name: str) -> str:
+    """Resolve nome → patterns/<slug>.js, barrando path traversal."""
+    slug = str(name).strip()
+    # Recusa em vez de sanitizar: nome "../x" viraria "x" e salvaria no arquivo errado.
+    if not slug or not all(c.isalnum() or c in '-_' for c in slug):
+        raise ValueError('nome inválido: use letras, números, - e _')
+    path = os.path.abspath(os.path.join(_PATTERNS_DIR, slug + '.js'))
+    if os.path.dirname(path) != _PATTERNS_DIR:
+        raise ValueError('nome inválido')
+    return path
+
+
+
+
+
+# ── Acervo de músicas (rota /musica) ─────────────────────────────────────────
+# A música é um .js legível em patterns/. O histórico é um .jsonl append-only ao
+# lado: escrita nova nunca corrompe versão velha, e um `tail` resolve o debug.
+# Nada aqui apaga: excluir move pra .trash/, restaurar salva versão NOVA.
+_VERSIONS_DIR = os.path.join(_PATTERNS_DIR, '.versions')
+_TRASH_DIR = os.path.join(_PATTERNS_DIR, '.trash')
+
+
+def _song_paths(name):
+    """(.js, .jsonl) do nome dado. Recusa nome torto em vez de sanitizar."""
+    js = _pattern_path(name)                      # ja valida o nome
+    slug = os.path.splitext(os.path.basename(js))[0]
+    return js, os.path.join(_VERSIONS_DIR, slug + '.jsonl')
+
+
+def _read_versions(jsonl):
+    out = []
+    try:
+        with open(jsonl, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue          # linha torta nao derruba o historico inteiro
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def _append_version(name, code, author, message, bpm):
+    import time
+    js, jsonl = _song_paths(name)
+    os.makedirs(_VERSIONS_DIR, exist_ok=True)
+    # bpm herda da versao anterior quando nao vem: um comentario ou um save sem
+    # tempo nao pode APAGAR o andamento da musica. Aconteceu — a tela abriu em 120
+    # uma musica de 122 porque o comentario anterior gravou bpm 0.
+    if not bpm:
+        anteriores = _read_versions(jsonl)
+        for v in reversed(anteriores):
+            if v.get('bpm'):
+                bpm = v['bpm']
+                break
+    entry = {
+        'ts': time.time(),
+        'author': 'claude' if author == 'claude' else 'user',
+        'message': message or '',
+        'bpm': int(bpm or 0),
+        'code': code,
+    }
+    with open(jsonl, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    with open(js, 'w', encoding='utf-8') as f:
+        f.write(code.rstrip() + '\n')
+    return entry
+
+
+def _ultimo_bpm(versions):
+    """Ultimo bpm NAO-ZERO. Historico antigo tem versao com bpm 0 gravado; ler o
+    ultimo cegamente faria a tela abrir uma musica de 122 em 120."""
+    for v in reversed(versions):
+        if v.get('bpm'):
+            return v['bpm']
+    return 0
+
+
+def _song_summary(slug, favoritos=None):
+    js, jsonl = _song_paths(slug)
+    versions = _read_versions(jsonl)
+    last = versions[-1] if versions else {}
+    try:
+        mtime = os.path.getmtime(js)
+    except OSError:
+        mtime = 0.0
+    if favoritos is None:
+        favoritos = _read_favoritos()
+    return {
+        'name': slug,
+        'favorito': slug in favoritos,
+        'versions': len(versions),
+        'bpm': _ultimo_bpm(versions),
+        'author': last.get('author') or 'user',
+        'message': last.get('message') or '',
+        'ts': last.get('ts') or mtime,
+    }
+
+
+@app.route('/api/songs', methods=['GET'])
+def songs_list():
+    try:
+        slugs = sorted(f[:-3] for f in os.listdir(_PATTERNS_DIR) if f.endswith('.js'))
+    except FileNotFoundError:
+        slugs = []
+    favoritos = _read_favoritos()          # le o arquivo UMA vez, nao uma por musica
+    items = [_song_summary(s, favoritos) for s in slugs]
+    items.sort(key=lambda it: it['ts'], reverse=True)   # mexida mais recente primeiro
+    return jsonify(items)
+
+
+@app.route('/api/songs/<name>', methods=['GET'])
+def song_get(name):
+    try:
+        js, jsonl = _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    try:
+        with open(js, encoding='utf-8') as f:
+            code = f.read()
+    except FileNotFoundError:
+        return jsonify({'error': 'nao existe'}), 404
+    # Lista de versoes SEM o codigo de cada uma: 40 versoes de 2 KB viram 80 KB por
+    # clique na lista. O codigo de uma versao vem em /v/<i>, quando pedido.
+    versions = [
+        {'i': i, 'ts': v.get('ts'), 'author': v.get('author'),
+         'message': v.get('message'), 'bpm': v.get('bpm'),
+         'chars': len(v.get('code') or '')}
+        for i, v in enumerate(_read_versions(jsonl))
+    ]
+    return jsonify({'name': name, 'code': code, 'versions': versions,
+                    'favorito': name in _read_favoritos(),
+                    'bpm': _ultimo_bpm(_read_versions(jsonl))})
+
+
+@app.route('/api/songs/<name>', methods=['POST'])
+def song_save(name):
+    data = request.json or {}
+    code = data.get('code') or ''
+    if not str(code).strip():
+        return jsonify({'error': 'nada pra salvar'}), 400
+    try:
+        _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    os.makedirs(_PATTERNS_DIR, exist_ok=True)
+    entry = _append_version(name, code, data.get('author', 'user'),
+                            data.get('message', ''), data.get('bpm', 0))
+    _, jsonl = _song_paths(name)
+    return jsonify({'status': 'ok', 'name': name,
+                    'version': len(_read_versions(jsonl)) - 1, 'ts': entry['ts']})
+
+
+@app.route('/api/songs/<name>/v/<int:i>', methods=['GET'])
+def song_version(name, i):
+    try:
+        _, jsonl = _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    versions = _read_versions(jsonl)
+    if not 0 <= i < len(versions):
+        return jsonify({'error': 'versao nao existe'}), 404
+    v = versions[i]
+    return jsonify({'i': i, 'code': v.get('code') or '', 'ts': v.get('ts'),
+                    'author': v.get('author'), 'message': v.get('message'),
+                    'bpm': v.get('bpm')})
+
+
+@app.route('/api/songs/<name>/restore/<int:i>', methods=['POST'])
+def song_restore(name, i):
+    """Restaurar SALVA uma versao nova. A linha do tempo nunca perde um elo."""
+    try:
+        _, jsonl = _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    versions = _read_versions(jsonl)
+    if not 0 <= i < len(versions):
+        return jsonify({'error': 'versao nao existe'}), 404
+    v = versions[i]
+    data = request.json or {}
+    entry = _append_version(name, v.get('code') or '', data.get('author', 'user'),
+                            data.get('message') or 'restaurado de v%d' % i,
+                            v.get('bpm') or 0)
+    return jsonify({'status': 'ok', 'version': len(versions), 'code': entry['code']})
+
+
+@app.route('/api/songs/<name>', methods=['DELETE'])
+def song_delete(name):
+    """Move pra .trash/. Nada aqui apaga de verdade."""
+    import time
+    try:
+        js, jsonl = _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if not os.path.exists(js):
+        return jsonify({'error': 'nao existe'}), 404
+    os.makedirs(_TRASH_DIR, exist_ok=True)
+    stamp = int(time.time())
+    slug = os.path.splitext(os.path.basename(js))[0]
+    os.replace(js, os.path.join(_TRASH_DIR, '%s.%d.js' % (slug, stamp)))
+    if os.path.exists(jsonl):
+        os.replace(jsonl, os.path.join(_TRASH_DIR, '%s.%d.jsonl' % (slug, stamp)))
+    favs = _read_favoritos()
+    if name in favs:      # favorito de musica que nao existe mais e lixo silencioso
+        _write_favoritos([n for n in favs if n != name])
+    return jsonify({'status': 'ok', 'trash': _TRASH_DIR})
+
+
+@app.route('/api/songs/<name>/rename', methods=['POST'])
+def song_rename(name):
+    novo = (request.json or {}).get('name', '')
+    try:
+        js, jsonl = _song_paths(name)
+        js2, jsonl2 = _song_paths(novo)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if not os.path.exists(js):
+        return jsonify({'error': 'nao existe'}), 404
+    if os.path.exists(js2):
+        return jsonify({'error': 'ja existe uma musica com esse nome'}), 409
+    os.replace(js, js2)
+    if os.path.exists(jsonl):
+        os.makedirs(_VERSIONS_DIR, exist_ok=True)
+        os.replace(jsonl, jsonl2)
+    favs = _read_favoritos()
+    if name in favs:      # favorito segue a musica; nao fica preso ao nome velho
+        _write_favoritos([novo if n == name else n for n in favs])
+    return jsonify({'status': 'ok', 'name': novo})
+
+
+# ── favoritos ────────────────────────────────────────────────────────────────
+#
+# Um arquivo com uma lista de nomes, e nao um campo dentro de cada versao: favorito
+# e opiniao de AGORA sobre a musica, nao um fato daquela versao. Gravar junto da
+# versao faria o historico responder "esta musica era favorita em marco?", que e
+# pergunta que ninguem faz, e obrigaria a reescrever historico pra desfavoritar.
+#
+# Nome renomeado ou excluido some do arquivo junto — favorito pendurado em musica
+# que nao existe vira lixo silencioso.
+
+def _favoritos_file():
+    """Calculado na hora, e nao uma constante de import: `_PATTERNS_DIR` e trocado
+    em teste (monkeypatch) e um caminho congelado escreveria no acervo de verdade."""
+    return os.path.join(_PATTERNS_DIR, '.favoritos.json')
+
+
+def _read_favoritos():
+    try:
+        with open(_favoritos_file(), encoding='utf-8') as f:
+            dados = json.load(f)
+        return [n for n in dados if isinstance(n, str)] if isinstance(dados, list) else []
+    except (OSError, ValueError):
+        return []          # arquivo torto nao pode derrubar o acervo inteiro
+
+
+def _write_favoritos(nomes):
+    os.makedirs(_PATTERNS_DIR, exist_ok=True)
+    with open(_favoritos_file(), 'w', encoding='utf-8') as f:
+        json.dump(sorted(set(nomes)), f, ensure_ascii=False, indent=1)
+
+
+@app.route('/api/songs/<name>/favorito', methods=['POST'])
+def song_favorito(name):
+    try:
+        js, _ = _song_paths(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if not os.path.exists(js):
+        return jsonify({'error': 'nao existe'}), 404
+
+    atuais = _read_favoritos()
+    # get_json(silent=True), e nao request.json: sem corpo, `request.json` levanta
+    # 415 no Flask novo. E chamar sem corpo e justamente a forma ergonomica —
+    # `POST /favorito` alterna, que e o que a tela e o curl querem.
+    pedido = (request.get_json(silent=True) or {}).get('favorito')
+    novo = (name not in atuais) if pedido is None else bool(pedido)   # sem corpo = alterna
+    if novo:
+        atuais.append(name)
+    else:
+        atuais = [n for n in atuais if n != name]
+    _write_favoritos(atuais)
+    return jsonify({'status': 'ok', 'name': name, 'favorito': novo})
+
+
 # ── YouTube live chat redirect ───────────────────────────────────────────────
 _yt_live_video_id = ''
 
@@ -1192,6 +1766,147 @@ def set_auto_msgs():
     cfg['auto_msgs'] = request.json or []
     _write_bot_cfg(cfg)
     return jsonify({'status': 'ok'})
+
+
+# ── yt_bot.py process control (Streamer Focus) ───────────────────────────────
+# bot_config.json é o arquivo real que o yt_bot.py lê no boot (video_id / banned).
+_BOT_DIR = os.path.dirname(os.path.abspath(__file__))
+BOT_CONFIG_FILE = os.path.join(_BOT_DIR, 'bot_config.json')
+BOT_SCRIPT = os.path.join(_BOT_DIR, 'yt_bot.py')
+BOT_LOG = os.path.join(_BOT_DIR, 'bot.log')
+# yt_bot autentica por OAuth (client_secret.json -> yt_token.json), NÃO pelo api_key do config.
+BOT_OAUTH_CLIENT = os.path.join(_BOT_DIR, 'client_secret.json')
+BOT_TOKEN = os.path.join(_BOT_DIR, 'yt_token.json')
+_bot_proc = None  # subprocess.Popen | None
+
+
+def _bot_log_tail(n=6):
+    try:
+        with open(BOT_LOG, encoding='utf-8', errors='replace') as f:
+            lines = [ln.rstrip() for ln in f.readlines() if ln.strip()]
+        return lines[-n:]
+    except Exception:
+        return []
+
+def _read_bot_file():
+    try:
+        with open(BOT_CONFIG_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _write_bot_file(cfg):
+    with open(BOT_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+def _bot_running():
+    return _bot_proc is not None and _bot_proc.poll() is None
+
+@app.route('/api/bot/status', methods=['GET'])
+def bot_status():
+    cfg = _read_bot_file()
+    running = _bot_running()
+    exit_code = None
+    if _bot_proc is not None and not running:
+        exit_code = _bot_proc.poll()
+    return jsonify({
+        'running': running,
+        'pid': (_bot_proc.pid if running else None),
+        'video_id': cfg.get('video_id', ''),
+        # readiness real: o bot precisa de OAuth, não do api_key
+        'has_oauth_client': os.path.exists(BOT_OAUTH_CLIENT),
+        'has_token': os.path.exists(BOT_TOKEN),
+        'exit_code': exit_code,
+        'log': _bot_log_tail(),
+    })
+
+@app.route('/api/bot/toggle', methods=['POST'])
+def bot_toggle():
+    global _bot_proc
+    import subprocess
+    if _bot_running():
+        try:
+            _bot_proc.terminate()
+        except Exception:
+            pass
+        _bot_proc = None
+        return jsonify({'status': 'ok', 'running': False})
+    # start — sem credencial o bot crasha na hora; falha explícita é melhor que crash mudo.
+    # Basta o yt_token.json (gerado pelo yt_auth_helper, que reusa o OAuth client
+    # do visantlabs/Drive) OU um client_secret.json próprio.
+    if not os.path.exists(BOT_TOKEN) and not os.path.exists(BOT_OAUTH_CLIENT):
+        return jsonify({
+            'status': 'error',
+            'error': 'Sem credencial do YouTube. Rode uma vez no terminal: '
+                     'cd backend && python yt_auth_helper.py — ele reusa o OAuth client que você já tem '
+                     '(visantlabs/Drive), não precisa baixar nada.'
+        }), 400
+    try:
+        log = open(BOT_LOG, 'w', encoding='utf-8')
+        _bot_proc = subprocess.Popen(
+            ['python', '-u', BOT_SCRIPT],
+            cwd=_BOT_DIR,
+            stdout=log, stderr=subprocess.STDOUT,
+        )
+        return jsonify({'status': 'ok', 'running': True, 'pid': _bot_proc.pid})
+    except Exception as e:
+        _bot_proc = None
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+_AI_DEFAULTS = {
+    'enabled': False,
+    'provider': 'gemini',
+    'model': 'gemini-2.5-flash',
+    'api_key': '',
+    'base_url': '',
+    'system_prompt': 'Você é o co-host de uma live. Responda em 1-2 frases, curto, direto e amigável.',
+    'max_reply_chars': 200,
+    'trigger': '!ai',
+    'cooldown_secs': 15,
+    # Marca de bot nas respostas da IA — o post sai com o OAuth do dono do canal,
+    # então sem prefixo a resposta parece ter sido escrita pelo próprio streamer.
+    'reply_prefix': '🤖',
+}
+
+@app.route('/api/bot/ai-config', methods=['GET', 'POST'])
+def bot_ai_config():
+    cfg = _read_bot_file()
+    ai = {**_AI_DEFAULTS, **(cfg.get('ai') or {})}
+    if request.method == 'POST':
+        patch = request.json or {}
+        # não sobrescreve a key com vazio (o painel não reenvia a key salva)
+        if 'api_key' in patch and not (patch.get('api_key') or '').strip():
+            patch.pop('api_key')
+        ai = {**ai, **patch}
+        cfg['ai'] = ai
+        _write_bot_file(cfg)
+        return jsonify({'status': 'ok'})
+    # full=1 → bot local recebe a config completa (com key). Senão, redige.
+    if request.args.get('full') == '1':
+        return jsonify(ai)
+    redacted = {**ai, 'api_key': ''}
+    redacted['has_api_key'] = bool((ai.get('api_key') or '').strip())
+    return jsonify(redacted)
+
+@app.route('/api/bot/config', methods=['GET', 'POST'])
+def bot_config():
+    if request.method == 'POST':
+        patch = request.json or {}
+        cfg = _read_bot_file()
+        for k in ('video_id', 'api_key', 'channel_id', 'banned_words', 'obs_pass'):
+            if k in patch:
+                cfg[k] = patch[k]
+        _write_bot_file(cfg)
+        return jsonify({'status': 'ok'})
+    cfg = _read_bot_file()
+    # nunca vaza segredos completos pro front — só flags de "preenchido"
+    return jsonify({
+        'video_id': cfg.get('video_id', ''),
+        'channel_id': cfg.get('channel_id', ''),
+        'banned_words': cfg.get('banned_words', []),
+        'has_api_key': bool(cfg.get('api_key')),
+        'has_obs_pass': bool(cfg.get('obs_pass')),
+    })
 
 
 # ── Overlay state (briefing / ticker / timer) ────────────────────────────────
@@ -1376,6 +2091,10 @@ def shield_stream():
         }
     )
 
+
+# /mix — musica + ambiencia por cima (keyboard-ui/PLAN-rota-ambiente.md)
+from mix_routes import bp as mix_bp
+app.register_blueprint(mix_bp)
 
 if __name__ == '__main__':
     import socket, sys

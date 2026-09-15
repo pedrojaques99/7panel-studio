@@ -25,6 +25,19 @@ const inputStyle: React.CSSProperties = {
   outline: 'none', width: '100%',
 }
 
+// Extrai o video ID de qualquer forma de link do YouTube:
+// v=ID, youtu.be/ID, /live/ID, /shorts/ID, /embed/ID, /watch/ID, ou ID puro (11 chars).
+export function parseVideoId(input: string): string {
+  const s = (input || '').trim()
+  if (!s) return ''
+  if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s
+  const m = s.match(/(?:v=|\/live\/|\/shorts\/|\/embed\/|\/watch\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+  if (m) return m[1]
+  // último recurso: primeiro token de 11 chars com boundary (evita pegar pedaço de domínio)
+  const any = s.match(/([a-zA-Z0-9_-]{11})(?:[?&/]|$)/)
+  return any ? any[1] : ''
+}
+
 export function YouTubeChatPanel({ onClose }: { onClose: () => void }) {
   const { zOf, bringToFront, endDrag, isDragging, scale } = usePanelCtx()
   const geo = loadGeo('ytchat', { x: 20, y: 520, w: 380, h: 500 })
@@ -63,19 +76,18 @@ setModAlerts(data.filter((a: any) => !a.dismissed))
     await fetch(`${API}/api/bot/mod-alerts/${id}/delete`, { method: 'POST' }).catch(() => {})
     setModAlerts(prev => prev.filter(a => a.id !== id))
   }
-  const [videoId, setVideoId] = useState(() => localStorage.getItem('yt-video-id') || '')
+  const [videoId, setVideoId] = useState(() => {
+    // auto-cura: se o valor salvo era uma URL inteira (bug antigo), re-parseia pro ID.
+    const raw = localStorage.getItem('yt-video-id') || ''
+    const id = parseVideoId(raw)
+    if (id && id !== raw) localStorage.setItem('yt-video-id', id)
+    return id
+  })
   const [editingId, setEditingId] = useState(false)
   const [tempId, setTempId] = useState(videoId)
   const [pinDuration, setPinDuration] = useState(() => Number(localStorage.getItem('yt-pin-duration') || 30))
   const [pinned, setPinned] = useState<PinnedMsg>(null)
   const pinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function parseVideoId(input: string): string {
-    const urlMatch = input.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
-    if (urlMatch) return urlMatch[1]
-    if (/^[a-zA-Z0-9_-]{11}$/.test(input.trim())) return input.trim()
-    return input.trim()
-  }
 
   function saveVideoId() {
     const id = parseVideoId(tempId)

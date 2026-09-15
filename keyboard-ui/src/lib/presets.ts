@@ -17,6 +17,16 @@ export type PanelVisibility = {
   session: boolean
   visualizer: boolean
   retrotv: boolean
+  // esteira do stretch: TRIAGEM mede a fonte, DOMAR conserta a cama depois
+  triagem: boolean
+  domar: boolean
+  // Estes ja eram passados pelo App.tsx sem estar aqui. Nao apareciam porque o
+  // TypeScript so reclama da PRIMEIRA propriedade excedente de um literal: o erro
+  // de `triagem` escondia `ytdl`, que escondia os outros. Erro pre-existente.
+  drummachine: boolean
+  ytdl: boolean
+  audioplayer: boolean
+  synesthizer: boolean
 }
 
 export type Preset = {

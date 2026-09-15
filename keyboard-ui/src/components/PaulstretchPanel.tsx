@@ -8,6 +8,7 @@ import { captureRegistry } from '../lib/capture-bus'
 import { CaptureIdContext } from '../lib/PanelHeader'
 import { ParamSlider } from '../lib/ParamSlider'
 import { getSharedAudioContext, getMasterCaptureNode } from '../lib/audio-context'
+import { publishStretch, subscribeStretch } from '../lib/stretch-bus'
 
 let _psCaptureDest: MediaStreamAudioDestinationNode | null = null
 let _psCurrentSource: MediaElementAudioSourceNode | null = null
@@ -64,6 +65,20 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
   const [ytEnd, setYtEnd] = useState('')
   const [ytState, setYtState] = useState<'idle' | 'loading'>('idle')
   const [showYt, setShowYt] = useState(false)
+  // proveniência: preenchido quando o arquivo chega pela esteira (triagem → esticar)
+  const [viaLabel, setViaLabel] = useState<string | null>(null)
+
+  // Esteira: recebe caminho + receita da triagem
+  useEffect(() => subscribeStretch(msg => {
+    if (msg.stage !== 'esticar') return
+    setUrlInput(msg.path)
+    setInputDuration(null)
+    if (msg.receita) {
+      setFactor(msg.receita.esticar)
+      setWindowSec(msg.receita.janela)
+    }
+    setViaLabel(msg.destino ? `via triagem · ${msg.destino}` : 'via triagem')
+  }), [])
 
   function updateJob(id: string, patch: Partial<Job>) {
     setJobs(prev => prev.map(j => j.id === id ? { ...j, ...patch } : j))
@@ -128,6 +143,8 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
         resultPath: data.path,
         resultUrl: resolveUrl(`/api/preview?path=${encodeURIComponent(data.path)}`),
       })
+      // esteira: entrega o esticado pro painel Domar
+      if (data.path) publishStretch({ stage: 'domar', path: data.path })
     } catch (e) {
       updateJob(job.id, { status: 'err', errMsg: String(e) })
     }
@@ -270,6 +287,15 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         <PanelHeader title="// Paulstretch" onClose={onClose} className="ps-drag">
+          {viaLabel && (
+            <span style={{
+              fontSize: 'var(--fs-xs)', color: '#a78bfa', fontFamily: 'monospace',
+              padding: '2px 7px', borderRadius: 5,
+              background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.18)',
+            }}>
+              {viaLabel}
+            </span>
+          )}
           {busyCount > 0 && (
             <span style={{ fontSize: 'var(--fs-sm)', color: '#a78bfa', fontFamily: 'monospace' }}>
               ⏳ {busyCount} job{busyCount > 1 ? 's' : ''}…
@@ -356,7 +382,7 @@ export function PaulstretchPanel({ onClose }: { onClose: () => void }) {
         {/* Source row */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 5 }}>
-            <input value={urlInput} onChange={e => setUrlInput(e.target.value)}
+            <input value={urlInput} onChange={e => { setUrlInput(e.target.value); setViaLabel(null) }}
               onKeyDown={e => e.key === 'Enter' && handleUrlStretch()}
               placeholder="server path or /api/preview?path=…"
               style={inp} />
