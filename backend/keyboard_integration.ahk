@@ -34,7 +34,10 @@ F20::ExecuteAction("key_f20")
 F21::ExecuteAction("key_f21")
 F22::ExecuteAction("key_f22")
 F23::ExecuteAction("key_f23")
-F24::ExecuteAction("key_f24")
+; F24 = Orbit Converter do Jaques Studio. Electron não registra F24 pura,
+; então a tecla vira Shift+F24, que é o atalho da órbita. "$" impede o Send
+; de disparar este hotkey de novo; sem Python no meio, sem atraso.
+$F24::Send +{F24}
 
 ; Exemplo: Controle de Volume do OBS (F4 / F5 se configurado no teclado)
 F4::ExecuteAction("obs_volume_up")
