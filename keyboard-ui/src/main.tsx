@@ -13,6 +13,7 @@ import { Fabrica } from './fabrica/Fabrica.tsx'
 import { Eq } from './eq/Eq.tsx'
 import { Musica } from './musica/Musica.tsx'
 import { Mix } from './mix/Mix.tsx'
+import { Sequenciador } from './sequenciador/Sequenciador.tsx'
 
 const path = window.location.pathname
 
@@ -46,6 +47,9 @@ const views: Record<string, React.ReactNode> = {
   // música por baixo, até duas ambiências por cima (catálogo único), preview e render
   '/mix':              <Mix />,
   '/mix/':             <Mix />,
+  // partitura em grade estilo seq.halfof8, motor @jaques/padroes (Z:\Cursor\sequenciador)
+  '/sequenciador':     <Sequenciador />,
+  '/sequenciador/':    <Sequenciador />,
 }
 
 createRoot(document.getElementById('root')!).render(
