@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { X, Trash2 } from 'lucide-react'
-import { FORMAS, desenharForma } from '@jaques/padroes'
+import { FORMAS, GEO, desenharForma } from '@jaques/padroes'
 import { Button } from '@/components/ui/button'
 import { DURACOES } from './estado'
 
@@ -64,13 +64,14 @@ export function MenuQuad({ alvo, onGlifo, onAcento, onDur, onApagar, onFechar }:
         {/* cima: glifo */}
         <div className={`${quad} -translate-x-1/2 bottom-10 flex-col items-center`} style={{ left: 0 }}>
           <span className="seq-rotulo">forma</span>
-          <div className="grid grid-cols-4 gap-1">
-            {FORMAS.map((g, i) => (
+          <div className="grid grid-cols-6 gap-1">
+            {/* o conjunto do estilo geo (padrão do motor): chapado, bold, abstrato */}
+            {GEO.map((i) => FORMAS[i]).map((g, k) => { const i = GEO[k]; return (
               <Button key={g.nome} variant="ghost" size="icon" title={g.nome} aria-pressed={existe && alvo.glifo === i}
                 className={existe && alvo.glifo === i ? 'seq-ativo' : ''} onClick={() => onGlifo(i)}>
                 <IconeForma indice={i} />
               </Button>
-            ))}
+            ) })}
           </div>
         </div>
         {/* direita: acento */}

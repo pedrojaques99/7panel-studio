@@ -17,7 +17,7 @@ export const linhasDoEstilo = (e: NomeEstilo) => ESTILOS[e].escala.length
 export interface Grade { largura: number; altura: number; celula: number; colunas: number; linhas: number; escalaGlifo?: number }
 
 /** lado do glifo em px: no estilo "bio" (padrão do motor) a forma ocupa `escalaGlifo` = 2,6 células */
-export const ladoGlifo = (g: Grade) => g.celula * (g.escalaGlifo ?? 2.6)
+export const ladoGlifo = (g: Grade) => g.celula * (g.escalaGlifo ?? 2) // padrão do estilo geo no motor
 
 const medidas = (g: Grade) => {
   const c = g.celula, m = c * 2
