@@ -12,6 +12,7 @@ import * as Tone from 'tone'
 import { Dice5, Link2, Minus, Music2, Pause, Play, Plus, X } from 'lucide-react'
 import {
   ESTILOS, LeitorAoVivo, PALETA, desenharPartitura, duracaoLoop, gerarNotas, FEATURES_SILENCIO,
+  desenharAureo, batidasDasNotas,
   type Features, type NomeEstilo, type Nota,
 } from '@jaques/padroes'
 import { Button } from '@/components/ui/button'
@@ -59,6 +60,10 @@ export function Sequenciador() {
   const [alvo, setAlvo] = useState<AlvoMenu | null>(null)
   const [sample, setSample] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  // vista áurea: a mesma música desenhada como retângulo áureo de fractais (foco anda na espiral a cada nota)
+  const [aurea, setAurea] = useState(false)
+  const aureaRef = useRef(false)
+  useEffect(() => { aureaRef.current = aurea }, [aurea])
 
   const canvas = useRef<HTMLCanvasElement>(null)
   const som = useRef<Som | null>(null)
@@ -128,14 +133,16 @@ export function Sequenciador() {
       }
       const passo = s ? s.passoAtual() : 0
       const t = passo * passoDoEstilo(e)
-      desenharPartitura(ctx, {
+      if (aureaRef.current) {
+        desenharAureo(ctx, { largura: w, altura: h, t, batidas: batidasDasNotas(notasRef.current), loop: duracaoLoop(e), features: f, seed: sd, profundidade: 9 })
+      } else desenharPartitura(ctx, {
         largura: w, altura: h, t, notas: notasRef.current, colunas, linhas, passosPorCompasso: ESTILOS[e].passos,
         loop: duracaoLoop(e), features: f, seed: sd, celula, cursor: !!s,
       })
 
       // mira na célula sob o mouse: quatro cantos em ciano
       const c = sobre.current
-      if (c && !gesto.current) {
+      if (c && !gesto.current && !aureaRef.current) {
         const G = ladoGlifo(grade.current), p = posCelula(grade.current, c.col, c.row), L = Math.round(G * 0.22), a = Math.max(1, Math.round(dpr))
         const x0 = Math.round(p.x) - a * 2, y0 = Math.round(p.y) - a * 2, x1 = Math.round(p.x + G) + a, y1 = Math.round(p.y + G) + a
         ctx.fillStyle = PALETA.acento
@@ -356,6 +363,7 @@ export function Sequenciador() {
           </Button>
           {sample && <Button variant="ghost" size="icon-sm" aria-label="tirar o sample" onClick={tirarSample}><X /></Button>}
         </div>
+        <Button variant="outline" size="sm" aria-pressed={aurea} className={aurea ? 'seq-ativo' : ''} onClick={() => setAurea((v) => !v)}>φ Áureo</Button>
         <Button variant="outline" size="sm" onClick={compartilhar}><Link2 /> Compartilhar</Button>
         {aviso && <span className="seq-rotulo seq-aviso" role="status">{aviso}</span>}
       </header>
