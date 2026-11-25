@@ -80,3 +80,4 @@ backend/client_secret.json
 
 # estado runtime da jam bridge (não é código)
 backend/jam_session.json
+backend/overlay_state.json

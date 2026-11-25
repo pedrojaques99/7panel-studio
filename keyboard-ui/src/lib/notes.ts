@@ -11,6 +11,22 @@ export const KEY_NOTE: Record<string, WhiteNote> = {
   z:'C3',x:'D3',c:'E3',v:'F3',b:'G3',n:'A3',m:'B3',
 }
 
+/**
+ * As pretas da oitava de cima, na fileira de cima — o mapa clássico de tracker:
+ * `w e` ficam entre `a s d`, e `t y u` entre `f g h j`. Assim a mão lê a posição
+ * física como leria um piano.
+ *
+ * Só a oitava de cima ganha pretas porque a fileira acima de `z x c v b n m` é
+ * `a s d f g h j`, que já são as brancas de cima — não sobra fileira alinhada. Pra
+ * tocar sustenido grave, use a transposição, que a tela já tem.
+ *
+ * Sem isto o teclado de PC não alcançava nenhum sustenido, e as faixas da era 5
+ * estão em Fá# e Si: não dava pra tocar nem a tônica.
+ */
+export const KEY_BLACK: Record<string, string> = {
+  w:'C#4', e:'D#4', t:'F#4', y:'G#4', u:'A#4',
+}
+
 export const BLACK_KEYS: { afterWhite: number; cents: number; label: string }[] = [
   { afterWhite: 0, cents: -1100, label: 'C#3' },
   { afterWhite: 1, cents: -900,  label: 'D#3' },

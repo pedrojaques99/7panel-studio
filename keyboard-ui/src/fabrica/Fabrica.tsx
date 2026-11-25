@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { ErrorBoundary } from '../components/ErrorBoundary'
-import { Tocar } from './Tocar'
+import { Mesa } from './Mesa'
 import { Medir, type Receita } from './Medir'
 import { Esticar } from './Esticar'
 import {
@@ -169,7 +169,7 @@ export function Fabrica({ modo = 'completo' }: { modo?: ModoFabrica } = {}) {
         {/* Só o passo corrente existe. Montar os três e esconder dois deixaria o
             sintetizador vivo atrás da tela de medição, gastando áudio à toa. */}
         {passo === 0 && (
-          <ErrorBoundary><Tocar onGravado={aoGravar} modo={modo} /></ErrorBoundary>
+          <ErrorBoundary><Mesa onGravado={aoGravar} modo={modo} /></ErrorBoundary>
         )}
 
         {passo === 1 && !etereo && (

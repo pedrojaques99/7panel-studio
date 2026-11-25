@@ -27,6 +27,13 @@ No preview ela vira o ganho MEDIO do ciclo, que e o que o ouvido percebe ao long
 """
 import json, math, os, subprocess, tempfile
 
+from dsp.domar import _ir
+
+
+class Cancelado(Exception):
+    """Render interrompido a pedido — mix_routes distingue disso de erro de verdade
+    (job vira status='cancelado', nao 'error', e a tela nao mostra mensagem de falha)."""
+
 MUSICA_LUFS = -20.0
 CAMADA_LUFS = (-34.0, -40.0)      # pico do lugar, pico da textura — cicla pra camada 3+
 PROFUNDIDADE_DB = (14.0, 10.0)    # idem
@@ -38,6 +45,11 @@ FMT = 'aformat=sample_rates=48000:channel_layouts=stereo'
 # nao e limiar criativo (esse nao existe mais) — e so pra a linha de comando do ffmpeg nao
 # virar um filter_complex gigante. 12 camadas ja é mais textura do que qualquer mix pede.
 MAX_CAMADAS = 12
+# EQ/reverb da camada e da musica: MESMO shelf e MESMO gerador de IR do /eq (dsp/domar.py) —
+# um tom so (bipolar) e uma sala fixa (so o wet e knob aqui), pra nao reinventar o que ja
+# foi calibrado e ouvido la.
+EQ_HZ = 4500.0
+REVERB_DECAY_S = 2.5
 
 
 def _r(cmd):
@@ -149,12 +161,22 @@ def aviso_repeticao(titulo, unidade_s, total_s):
     return None
 
 
-def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None, progresso=None):
+def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None, progresso=None,
+           musica_params=None, atraso_s=0.0, registrar_proc=None, deve_cancelar=None):
     """camadas: [{'item': <item do catalogo>, 'fonte': caminho ou url, 'nivel_db': float,
-    'respira': bool, 'gap_s': float}]
+    'respira': bool, 'gap_s': float, 'eq_db': float, 'reverb_wet': float}]
 
     `nivel_db` e relativo ao limiar da casa: 0 = CAMADA_LUFS do papel da camada (camada 3+
-    cicla pelos dois papeis testados). `gap_s` e silencio entre uma volta e a proxima."""
+    cicla pelos dois papeis testados). `gap_s` e silencio entre uma volta e a proxima.
+    `eq_db`/`reverb_wet` sao o mesmo shelf/reverb do /eq (dsp/domar.py), um so tom e uma
+    so sala — default 0.0 nos dois, entao chamada sem eles sai identica a antes deles existir.
+
+    `musica_params`: {'nivel_db', 'eq_db', 'reverb_wet'} — mesmos tres, pra musica tambem
+    poder ser ajustada (antes so ia pro alvo automatico de -20 LUFS sem controle nenhum).
+
+    `atraso_s`: segundos entre o inicio de uma camada e a proxima (camada `i` comeca
+    `i * atraso_s` depois da musica) — pra nao estourar tudo junto num render com varias
+    texturas pesadas."""
     if not 1 <= len(camadas) <= MAX_CAMADAS:
         raise ValueError('de 1 a %d camadas de ambiencia' % MAX_CAMADAS)
     tmp = tempfile.mkdtemp(prefix='mix_')
@@ -178,10 +200,39 @@ def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None
         T = dm
         entradas = ['-i', musica]
         lm = lufs(musica)
-    gm = MUSICA_LUFS - lm if lm is not None else 0.0
+    mp = musica_params or {}
+    m_nivel = float(mp.get('nivel_db') or 0.0)
+    gm = (MUSICA_LUFS + m_nivel) - lm if lm is not None else 0.0
 
-    cadeias = ['[0:a]%s,volume=%.2fdB[m]' % (FMT, gm)]
-    rotulos = ['[m]']
+    # IRs de reverb sao entradas EXTRAS do ffmpeg, adicionadas so quando algum reverb_wet > 0
+    # (musica ou camada) e sempre DEPOIS da musica+camadas — o indice de cada uma so e
+    # conhecido na hora, entao a lista de flags e o proximo indice andam juntos aqui.
+    ir_entradas = []
+    proximo_ir_idx = [1 + len(camadas)]
+
+    def _cadeia(input_idx, filtros_secos, wet, tag):
+        """[input_idx:a] + `filtros_secos` (sem colchete de rotulo) -> `[tag]`. Com
+        `wet` > 0 o seco e a cauda (convolucao com o IR do /eq) se somam antes do
+        rotulo — o seco nunca perde nivel, a cauda so ADICIONA (mesma regra do domar.py)."""
+        if wet <= 0:
+            return ['[%d:a]%s[%s]' % (input_idx, filtros_secos, tag)], '[%s]' % tag
+        ir_idx = proximo_ir_idx[0]
+        proximo_ir_idx[0] += 1
+        ir_entradas.extend(['-i', _ir(REVERB_DECAY_S)])
+        return [
+            '[%d:a]%s,asplit=2[%sseco][%spre]' % (input_idx, filtros_secos, tag, tag),
+            '[%spre][%d:a]afir=irnorm=-1[%scauda]' % (tag, ir_idx, tag),
+            '[%sseco][%scauda]amix=inputs=2:weights=1 %.3f:normalize=0[%s]' % (tag, tag, wet, tag),
+        ], '[%s]' % tag
+
+    def _eq(eq_db):
+        return ',treble=g=%.1f:f=%g:w=0.6' % (eq_db, EQ_HZ) if eq_db else ''
+
+    m_eq = float(mp.get('eq_db') or 0.0)
+    m_wet = max(0.0, min(1.0, float(mp.get('reverb_wet') or 0.0)))
+    frag, rot_m = _cadeia(0, '%s,volume=%.2fdB%s' % (FMT, gm, _eq(m_eq)), m_wet, 'm')
+    cadeias = list(frag)
+    rotulos = [rot_m]
     relato, avisos = [], []
     for i, c in enumerate(camadas):
         item = c['item']
@@ -213,8 +264,17 @@ def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None
             unid = com_gap(unid, tmp, 'camada%d' % i, gap_s)
             du += gap_s
         entradas += ['-stream_loop', str(max(math.ceil(T / du), 1) - 1), '-i', unid]
-        cadeias.append('[%d:a]%s,volume=%.2fdB%s[c%d]' % (i + 1, FMT, ga, resp, i))
-        rotulos.append('[c%d]' % i)
+        # entrada escalonada: camada i comeca i*atraso_s depois da musica. `adelay` e
+        # silencio puro no comeco do stream — nao desloca a duracao total, que continua
+        # cortada em T no mapeamento final.
+        atraso_ms = max(0, int(round(i * float(atraso_s or 0.0) * 1000)))
+        delay = ',adelay=%d:all=1' % atraso_ms if atraso_ms > 0 else ''
+        eq_db = float(c.get('eq_db') or 0.0)
+        wet = max(0.0, min(1.0, float(c.get('reverb_wet') or 0.0)))
+        frag, rot_c = _cadeia(i + 1, '%s,volume=%.2fdB%s%s%s' % (FMT, ga, resp, _eq(eq_db), delay),
+                              wet, 'c%d' % i)
+        cadeias += frag
+        rotulos.append(rot_c)
         avisos += avisos_fixos(item)
         # no preview a unidade foi recortada de proposito (acima): medir repeticao nela
         # acusaria uma volta que o export nao vai ter. A tela ja avisa pela duracao real.
@@ -232,12 +292,17 @@ def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None
           % (''.join(rotulos), len(rotulos), fade, max(T - fade, 0.0), fade, LIMITE))
     codec = ['-c:a', 'libmp3lame', '-b:a', '320k'] if formato == 'mp3' else ['-c:a', 'pcm_s24le']
     os.makedirs(os.path.dirname(os.path.abspath(saida)), exist_ok=True)
-    cmd = (['ffmpeg', '-y', '-v', 'error', '-nostats', '-progress', 'pipe:1'] + entradas
+    cmd = (['ffmpeg', '-y', '-v', 'error', '-nostats', '-progress', 'pipe:1'] + entradas + ir_entradas
            + ['-filter_complex', fc, '-map', '[out]', '-t', '%.3f' % T, '-ar', '48000', '-ac', '2']
            + codec + [saida])
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, encoding='utf-8', errors='ignore')
+    if registrar_proc:
+        registrar_proc(p)    # mix_routes guarda o Popen pra poder matar num /cancel
     for linha in p.stdout:
+        if deve_cancelar and deve_cancelar():
+            p.terminate()
+            break
         if progresso and linha.startswith(('out_time_us=', 'out_time_ms=')):
             try:
                 progresso(min(99.0, int(linha.split('=', 1)[1]) / 1e6 / T * 100))
@@ -245,6 +310,8 @@ def render(musica, camadas, saida, duracao_s=None, formato='mp3', preview_s=None
                 pass
     err = p.stderr.read()
     p.wait()
+    if deve_cancelar and deve_cancelar():
+        raise Cancelado('render cancelado')
     if p.returncode != 0 or not os.path.exists(saida):
         raise RuntimeError('ffmpeg falhou: ' + err[-400:])
     return dict(out=os.path.abspath(saida), dur_s=round(T, 1), preview=preview,

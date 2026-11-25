@@ -49,7 +49,8 @@ function crushWet(bits: number): number {
   return bits >= 12 ? 0 : 1
 }
 
-export function createFxChain(params: FxParams, captureDest?: MediaStreamAudioDestinationNode): FxChain {
+/** `saida` ausente = master capture (painéis de synth); a /final passa o canal da trilha. */
+export function createFxChain(params: FxParams, captureDest?: MediaStreamAudioDestinationNode, saida?: Tone.InputNode): FxChain {
   const p = params
 
   const input = new Tone.Gain(1)
@@ -68,7 +69,7 @@ export function createFxChain(params: FxParams, captureDest?: MediaStreamAudioDe
   const outputGain = new Tone.Gain(Tone.gainToDb(p.vol) > -Infinity ? p.vol : 0)
 
   // Wire: input → gate → crush → drive → bite → filter → chorus → phaser → delay → shimmer → reverb → analyser → gain → master
-  outputGain.connect(getMasterCaptureNode())
+  outputGain.connect(saida ?? getMasterCaptureNode())
   input.chain(gate, bitcrusher, distortion, chebyshev, filter, chorus, phaser, delay, pitchShift, reverb, analyser, outputGain)
 
   if (captureDest) analyser.connect(captureDest)

@@ -20,11 +20,19 @@ export type Faixa = {
   grupo: string; nome: string; caminho: string; mb: number
   dur_s: number | null; modificado: string | null
 }
-export type Camada = { id: string; nivel_db: number; respira: boolean; gap_s: number }
+export type Camada = {
+  id: string; nivel_db: number; respira: boolean; gap_s: number
+  eq_db?: number; reverb_wet?: number
+}
+/* mesmos 3 parametros da camada, mas pra musica — sem gap/respira/atraso: nao fazem
+   sentido pra faixa de base, que nao e loop de camada. */
+export type MusicaParams = { nivel_db: number; eq_db: number; reverb_wet: number }
+export const MUSICA_PARAMS_ZERO: MusicaParams = { nivel_db: 0, eq_db: 0, reverb_wet: 0 }
 /* mix com nome, gravado em backend/assets/mixes_salvos.json — tudo que o export precisa */
 export type MixSalvo = {
   id: string; nome: string; musica: string; camadas: Camada[]
   visual_id: string | null; duracao_s: number | null; formato: 'mp3' | 'wav'; salvo_em: string
+  musica_params?: MusicaParams; atraso_s?: number
 }
 export type Visual = {
   id: string
@@ -35,7 +43,7 @@ export type Visual = {
   thumb: string | null
 }
 export type Job = {
-  status: 'running' | 'done' | 'error'
+  status: 'running' | 'done' | 'error' | 'cancelado'
   progress?: number
   out?: string
   /* só quando teve visual: job.out vira o .mp4 e o áudio puro (fade/limiter já aplicados,
@@ -87,6 +95,8 @@ export const tempo = (s: number) => {
 }
 export const fmtDb = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(0)} dB`
 export const fmtS = (v: number) => (v <= 0 ? 'sem gap' : `${v.toFixed(0)} s`)
+export const fmtPct = (v: number) => `${Math.round(v * 100)}%`
+export const fmtAtraso = (v: number) => (v <= 0 ? 'junto' : `${v.toFixed(1)} s`)
 
 /**
  * Sugestão de próxima camada: heurística client-side, sem histórico novo no backend

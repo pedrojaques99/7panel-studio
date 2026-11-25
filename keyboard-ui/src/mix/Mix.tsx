@@ -22,19 +22,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Anchor, AudioLines, Bird, Building2, Check, ChevronDown, ChevronRight, CircleDashed,
-  CloudRain, Droplet, Filter, Flame, Gamepad2, History, Home, Layers, Maximize2, Moon,
+  CloudRain, Droplet, Filter, Flame, FolderPlus, Gamepad2, History, Home, Layers, Maximize2, Moon,
   Mountain, MoreHorizontal, Pause, PartyPopper, Play, Save, Settings2, Ship, Shapes, Sparkles,
-  Trash2, Trees, Volume2, VolumeX, Wind, X,
+  Square, Trash2, Trees, Volume2, VolumeX, Wind, X,
 } from 'lucide-react'
 import { VintageKnob } from '@/components/ui/vintage-knob'
 import { VintageLed } from '@/components/ui/vintage-led'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { resolveUrl, audioSrc } from '../lib/api'
+import { montarCadeiaFx, aplicaFx, type CadeiaFx } from '../lib/audio-fx'
 import {
-  CATEGORIAS, DURACOES, MAX_CAMADAS, PAPEL, PREVIEW_S, combosIguais, fmtDb, fmtS, mmss,
-  sugerirCamadas, tempo, volumePreview,
-  type Ambiente, type Camada, type Faixa, type Job, type MixSalvo, type Visual,
+  CATEGORIAS, DURACOES, MAX_CAMADAS, MUSICA_PARAMS_ZERO, PAPEL, PREVIEW_S, combosIguais, fmtAtraso,
+  fmtDb, fmtPct, fmtS, mmss, sugerirCamadas, tempo, volumePreview,
+  type Ambiente, type Camada, type Faixa, type Job, type MixSalvo, type MusicaParams, type Visual,
 } from './modelo'
 
 /* um icone por categoria de ambiência — a lista era só texto, agora escaneia mais rápido */
@@ -97,8 +98,8 @@ const painel: React.CSSProperties = {
 /* os controles da camada ativa (nível, mudo, respira) — sempre no TOPO do painel de
    ambiência/música, colados na coisa que eles afetam, não numa seção à parte lá embaixo. */
 const paramCard: React.CSSProperties = {
-  display: 'grid', gap: 8, justifyItems: 'start', padding: 12, position: 'relative',
-  background: 'var(--vintage-surface-1)', border: '1px solid var(--vintage-border)', minWidth: 190,
+  display: 'grid', gap: 8, justifyItems: 'start', padding: 10, position: 'relative',
+  background: 'var(--vintage-surface-1)', border: '1px solid var(--vintage-border)', width: '100%',
 }
 /* "tirar" desgrudado do auto-layout dos outros botões — some no canto, não compete
    com mudo/respira por espaço na mesma linha */
@@ -166,12 +167,30 @@ export function Mix() {
   const [cats, setCats] = useState<Set<string>>(() => new Set())
   const [musica, setMusica] = useState<Faixa | null>(null)
   const [camadas, setCamadas] = useState<Camada[]>([])
+  /* a música também é um "card" com parâmetros — nível/tom/reverb, os mesmos três das
+     camadas. Sem gap/respira/atraso: não fazem sentido pra faixa de base. */
+  const [musicaParams, setMusicaParams] = useState<MusicaParams>(MUSICA_PARAMS_ZERO)
+  /* segundos entre o início de uma camada e a próxima — pra não começar tudo junto e
+     "bugar" (estourar CPU/áudio no browser com várias camadas disparando no mesmo tick) */
+  const [atrasoCamadas, setAtrasoCamadas] = useState(0)
+  /* ids já escalonados nesta rodada de play — sem isto o effect (que roda a cada ajuste
+     de knob) reagendaria o mesmo play() várias vezes */
+  const escalonadosRef = useRef<Set<string>>(new Set())
   const [visuais, setVisuais] = useState<Visual[]>([])
   const [catsVisual, setCatsVisual] = useState<Set<string>>(() => new Set())
+  /* pastas extra de footage (além da fixa) — escolhidas pela tela, entram na próxima
+     varredura do catálogo de visual (POST /api/mix/visual-pastas) */
+  const [pastasVisuais, setPastasVisuais] = useState<{ pasta: string; prefixo: string }[]>([])
+  const [novaPasta, setNovaPasta] = useState('')
+  const [pastaJob, setPastaJob] = useState<{ status: 'running' | 'done' | 'error'; error?: string } | null>(null)
+  const [pastasAbertas, setPastasAbertas] = useState(false)
   const [visualId, setVisualId] = useState<string | null>(null)
   const [duracao, setDuracao] = useState<number | null>(null)
   const [formato, setFormato] = useState<'mp3' | 'wav'>('mp3')
   const [job, setJob] = useState<Job | null>(null)
+  /* pro botão de cancelar: precisa do id do job em andamento pra poder chamar /cancel */
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [cancelando, setCancelando] = useState(false)
   const [erro, setErro] = useState('')
   const [tocando, setTocando] = useState(false)
   const [verTodasAmb, setVerTodasAmb] = useState(false)
@@ -194,6 +213,49 @@ export function Mix() {
   const [mudo, setMudo] = useState<Set<string>>(() => new Set())
   const [posicao, setPosicao] = useState({ atual: 0, dur: 0 })
 
+  /* ── TOM/RVB em tempo real ────────────────────────────────────────────────
+   * Os knobs já mandavam eq_db/reverb_wet pro backend (render de verdade), mas no
+   * browser só o NÍVEL tocava — TOM e RVB ficavam guardados sem efeito ouvível até o
+   * preview de 30s. Agora cada <audio> (música + camada) ganha seu próprio grafo
+   * (`montarCadeiaFx`, de `lib/audio-fx.ts` — a mesma raiz que o /eq usa), plugado
+   * numa ÚNICA AudioContext raiz da tela: é o "barramento" que a mesa inteira toca. */
+  const ctxAudioRef = useRef<AudioContext | null>(null)
+  const getCtxAudio = useCallback(() => {
+    if (!ctxAudioRef.current) ctxAudioRef.current = new AudioContext()
+    void ctxAudioRef.current.resume()
+    return ctxAudioRef.current
+  }, [])
+  const fxMusicaRef = useRef<CadeiaFx | null>(null)
+  const fxCamadaRef = useRef<Map<string, CadeiaFx>>(new Map())
+  /* refs pra ler o estado mais recente de dentro do onPlay (o grafo monta uma vez só,
+     no primeiro play — ver comentário do /eq sobre createMediaElementSource). Sincronizadas
+     em effect, não durante o render — mutar ref no corpo do componente é o que já dá
+     "Cannot update ref during render" no tocandoRef acima; aqui não repete o problema. */
+  const musicaParamsRef = useRef(musicaParams)
+  const camadasRef = useRef(camadas)
+  useEffect(() => { musicaParamsRef.current = musicaParams }, [musicaParams])
+  useEffect(() => { camadasRef.current = camadas }, [camadas])
+
+  const montarFxMusica = useCallback(() => {
+    const el = musicaRef.current
+    if (!el || fxMusicaRef.current) return
+    const ctx = getCtxAudio()
+    const src = ctx.createMediaElementSource(el)
+    fxMusicaRef.current = montarCadeiaFx(ctx, src, ctx.destination)
+    aplicaFx(fxMusicaRef.current, musicaParamsRef.current.eq_db, musicaParamsRef.current.reverb_wet)
+  }, [getCtxAudio])
+
+  const montarFxCamada = useCallback((id: string) => {
+    const el = camadaRefs.current[id]
+    if (!el || fxCamadaRef.current.has(id)) return
+    const ctx = getCtxAudio()
+    const src = ctx.createMediaElementSource(el)
+    const g = montarCadeiaFx(ctx, src, ctx.destination)
+    fxCamadaRef.current.set(id, g)
+    const c = camadasRef.current.find(x => x.id === id)
+    aplicaFx(g, c?.eq_db ?? 0, c?.reverb_wet ?? 0)
+  }, [getCtxAudio])
+
   const limpaGaps = useCallback(() => {
     for (const t of Object.values(gapTimers.current)) window.clearTimeout(t)
     gapTimers.current = {}
@@ -203,16 +265,18 @@ export function Mix() {
     let vivo = true
     void (async () => {
       try {
-        const [c, m, v] = await Promise.all([
+        const [c, m, v, pv] = await Promise.all([
           fetch(resolveUrl('/api/mix/catalog')).then(r => r.json()),
           fetch(resolveUrl('/api/mix/musicas')).then(r => r.json()),
           fetch(resolveUrl('/api/mix/visuais')).then(r => r.json()),
+          fetch(resolveUrl('/api/mix/visual-pastas')).then(r => r.json()),
         ])
         if (!vivo) return
         if (c?.error) setErroCarga(String(c.error))
         setAmbientes(c?.itens ?? [])
         setFaixas(m?.musicas ?? [])
         setVisuais(v?.itens ?? [])
+        setPastasVisuais(pv?.pastas ?? [])
       } catch (e) {
         if (vivo) setErroCarga(`não consegui falar com o backend: ${String(e)}`)
       }
@@ -221,6 +285,9 @@ export function Mix() {
       vivo = false
       if (timerRef.current) window.clearInterval(timerRef.current)
       limpaGaps()
+      // fecha a AudioContext raiz junto — senão sai da tela e o browser deixa o
+      // contexto (e os nós ligados a ele) vivo sem ninguém escutando
+      void ctxAudioRef.current?.close()
     }
   }, [limpaGaps])
 
@@ -283,13 +350,16 @@ export function Mix() {
     try {
       const r = await fetch(resolveUrl('/api/mix/mixes'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nome, musica: musica.caminho, camadas, visual_id: visualId, duracao_s: duracao, formato }),
+        body: JSON.stringify({
+          nome, musica: musica.caminho, camadas, visual_id: visualId, duracao_s: duracao, formato,
+          musica_params: musicaParams, atraso_s: atrasoCamadas,
+        }),
       })
       const d = await r.json()
       if (d?.error) { setErro(String(d.error)); return }
       setMixes(d?.mixes ?? [])
     } catch (e) { setErro(String(e)) }
-  }, [nomeMix, musica, camadas, visualId, duracao, formato])
+  }, [nomeMix, musica, camadas, visualId, duracao, formato, musicaParams, atrasoCamadas])
 
   const abrirMix = useCallback((m: MixSalvo) => {
     const f = faixas.find(x => x.caminho === m.musica)
@@ -300,6 +370,8 @@ export function Mix() {
     setDuracao(m.duracao_s)
     setFormato(m.formato)
     setNomeMix(m.nome)
+    setMusicaParams(m.musica_params ?? MUSICA_PARAMS_ZERO)
+    setAtrasoCamadas(m.atraso_s ?? 0)
     setMixesAbertos(false)
     // o visual do mix vira a escolha da música também, pra reabrir a música bater com o mix
     void fetch(resolveUrl('/api/mix/visual-pick'), {
@@ -347,6 +419,58 @@ export function Mix() {
     else n.add(k)
     return n
   })
+
+  /* acompanha o job de varredura (POST/DELETE /api/mix/visual-pastas) e, quando termina,
+     relê /visuais — mesmo esquema de polling do render, sem inventar outro mecanismo */
+  const acompanhaPastaJob = useCallback((jobId: string) => {
+    const t = window.setInterval(() => {
+      void (async () => {
+        try {
+          const s = await fetch(resolveUrl(`/api/mix/status/${jobId}`))
+          const j = await s.json() as { status: 'running' | 'done' | 'error'; error?: string }
+          if (j.status !== 'running') {
+            window.clearInterval(t)
+            setPastaJob(j.status === 'error' ? { status: 'error', error: j.error } : { status: 'done' })
+            if (j.status === 'done') {
+              const v = await fetch(resolveUrl('/api/mix/visuais')).then(r => r.json())
+              setVisuais(v?.itens ?? [])
+            }
+          }
+        } catch { /* rede piscou: a próxima batida do polling resolve */ }
+      })()
+    }, 1000)
+  }, [])
+
+  const adicionarPastaVisual = useCallback(async () => {
+    const pasta = novaPasta.trim()
+    if (!pasta) return
+    setPastaJob({ status: 'running' })
+    try {
+      const r = await fetch(resolveUrl('/api/mix/visual-pastas'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pasta }),
+      })
+      const d = await r.json()
+      if (d?.error || !d?.job_id) { setPastaJob({ status: 'error', error: String(d?.error ?? 'sem job') }); return }
+      setPastasVisuais(d.pastas ?? [])
+      setNovaPasta('')
+      acompanhaPastaJob(d.job_id)
+    } catch (e) { setPastaJob({ status: 'error', error: String(e) }) }
+  }, [novaPasta, acompanhaPastaJob])
+
+  const removerPastaVisual = useCallback(async (pasta: string) => {
+    setPastaJob({ status: 'running' })
+    try {
+      const r = await fetch(resolveUrl('/api/mix/visual-pastas'), {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pasta }),
+      })
+      const d = await r.json()
+      if (d?.error || !d?.job_id) { setPastaJob({ status: 'error', error: String(d?.error ?? 'sem job') }); return }
+      setPastasVisuais(d.pastas ?? [])
+      acompanhaPastaJob(d.job_id)
+    } catch (e) { setPastaJob({ status: 'error', error: String(e) }) }
+  }, [acompanhaPastaJob])
 
   const contagem = useMemo(() => {
     const c: Record<string, number> = {}
@@ -422,17 +546,50 @@ export function Mix() {
       // parada no meio de um gap não é "pausada": dar play aqui (girar um knob dispara este
       // effect) cortaria o silêncio que o `onEnded` agendou
       if (el && tocando && el.paused && !gapTimers.current[c.id]) {
-        const p = el.play()
-        if (p) p.catch(() => { /* autoplay recusado: o próximo ▶ resolve */ })
+        // entrada escalonada: camada i começa i*atraso depois — senão todas disparam no
+        // mesmo tick do ▶ e o browser engasga com N streams abrindo juntos
+        const atrasoMs = i * atrasoCamadas * 1000
+        if (atrasoMs <= 0 || escalonadosRef.current.has(c.id)) {
+          const p = el.play()
+          if (p) p.catch(() => { /* autoplay recusado: o próximo ▶ resolve */ })
+        } else {
+          escalonadosRef.current.add(c.id)
+          window.setTimeout(() => {
+            if (tocandoRef.current && el.isConnected && el.paused) {
+              el.play().catch(() => { /* autoplay recusado: o próximo ▶ resolve */ })
+            }
+          }, atrasoMs)
+        }
       }
     })
-  }, [camadas, porId, tocando, mudo])
+  }, [camadas, porId, tocando, mudo, atrasoCamadas])
+
+  /* TOM/RVB de cada camada em tempo real: gira o knob e o grafo já montado (se a
+     camada já tocou uma vez) segue junto, sem esperar o próximo ▶. Camada que sai da
+     lista perde a entrada do mapa — o <audio> dela já foi desmontado. */
+  useEffect(() => {
+    const vivos = new Set(camadas.map(c => c.id))
+    for (const id of fxCamadaRef.current.keys()) {
+      if (!vivos.has(id)) fxCamadaRef.current.delete(id)
+    }
+    for (const c of camadas) {
+      const g = fxCamadaRef.current.get(c.id)
+      if (g) aplicaFx(g, c.eq_db ?? 0, c.reverb_wet ?? 0)
+    }
+  }, [camadas])
+
+  /* mesma coisa pra música */
+  useEffect(() => {
+    const g = fxMusicaRef.current
+    if (g) aplicaFx(g, musicaParams.eq_db, musicaParams.reverb_wet)
+  }, [musicaParams])
 
   const sincroniza = useCallback((tocar: boolean) => {
     setTocando(tocar)
     if (!tocar) {
       for (const el of Object.values(camadaRefs.current)) el?.pause()
       limpaGaps()
+      escalonadosRef.current.clear()   // próximo ▶ reescalona do zero
     }
     // o video do visual escolhido toca junto — e o "como se fosse o render" do transporte
     const v = videoRef.current
@@ -483,6 +640,8 @@ export function Mix() {
         body: JSON.stringify({
           musica: musica.caminho,
           camadas,
+          musica_params: musicaParams,
+          atraso_s: atrasoCamadas,
           duracao_s: preview ? null : duracao,
           formato: preview ? 'mp3' : formato,
           preview_s: preview ? PREVIEW_S : null,
@@ -497,16 +656,18 @@ export function Mix() {
         setJob(null)
         return
       }
-      const jobId: string = data.job_id
+      const idDoJob: string = data.job_id
+      setJobId(idDoJob)
       if (timerRef.current) window.clearInterval(timerRef.current)
       timerRef.current = window.setInterval(() => {
         void (async () => {
           try {
-            const s = await fetch(resolveUrl(`/api/mix/status/${jobId}`))
+            const s = await fetch(resolveUrl(`/api/mix/status/${idDoJob}`))
             const j = await s.json() as Job
             setJob({ ...j, preview })
             if (j.status !== 'running') {
               if (timerRef.current) window.clearInterval(timerRef.current)
+              setJobId(null)
               if (j.status === 'error') setErro(String(j.error ?? 'erro no render'))
             }
           } catch { /* rede piscou: a próxima batida do polling resolve */ }
@@ -515,8 +676,20 @@ export function Mix() {
     } catch (e) {
       setErro(String(e))
       setJob(null)
+      setJobId(null)
     }
-  }, [musica, camadas, duracao, formato, visualId])
+  }, [musica, camadas, duracao, formato, visualId, musicaParams, atrasoCamadas])
+
+  /* cancelar: o /cancel mata o ffmpeg em andamento (ou marca a flag, se pego bem na
+     virada pro compor_video) — quem confirma que parou é o próprio polling acima, que já
+     está rodando e vê o status virar 'cancelado' no próximo tick */
+  const cancelarExport = useCallback(async () => {
+    if (!jobId) return
+    setCancelando(true)
+    try {
+      await fetch(resolveUrl(`/api/mix/cancel/${jobId}`), { method: 'POST' })
+    } catch (e) { setErro(String(e)) } finally { setCancelando(false) }
+  }, [jobId])
 
   return (
     <div style={{
@@ -538,6 +711,7 @@ export function Mix() {
             `ended` — sem isso o ▶ ignorava o knob de GAP (só o export aplicava) */}
         {camadas.map(c => (
           <audio key={c.id} ref={el => { camadaRefs.current[c.id] = el }} loop={c.gap_s <= 0} preload="none"
+            crossOrigin="anonymous" onPlay={() => montarFxCamada(c.id)}
             onEnded={e => {
               const el = e.currentTarget
               // o timer NÃO pode ser limpo no ref: ref inline recebe null a cada re-render
@@ -558,8 +732,8 @@ export function Mix() {
            null quando o updater roda (foi o "Cannot read properties of null (reading
            duration)" que quebrou a tela). */}
         {musica && (
-          <audio ref={musicaRef} src={audioSrc(musica.caminho)}
-            onPlay={() => sincroniza(true)} onPause={() => sincroniza(false)} onEnded={() => sincroniza(false)}
+          <audio ref={musicaRef} src={audioSrc(musica.caminho)} crossOrigin="anonymous"
+            onPlay={() => { sincroniza(true); montarFxMusica() }} onPause={() => sincroniza(false)} onEnded={() => sincroniza(false)}
             onLoadedMetadata={e => { const dur = e.currentTarget.duration || 0; setPosicao(p => ({ ...p, dur })) }}
             onTimeUpdate={e => { const atual = e.currentTarget.currentTime; setPosicao(p => ({ ...p, atual })) }}
             style={{ display: 'none' }} />
@@ -574,6 +748,25 @@ export function Mix() {
           {/* ── a música ── */}
           <section style={painel}>
             <span style={rotulo}>1 · música</span>
+            {/* a música tocando também é um card com parâmetros — mesmo nível/tom/reverb
+                das camadas, num card do mesmo tamanho/estilo (paramCard) */}
+            {musica && (
+              <div className="mix-entra" style={{ ...paramCard, width: 'fit-content', minWidth: 190 }}>
+                <span style={rotulo}>tocando</span>
+                <span title={musica.nome} style={{
+                  color: 'var(--vintage-value)', maxWidth: 220, width: '100%',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{musica.nome}</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <VintageKnob label="NÍVEL" min={-24} max={24} value={musicaParams.nivel_db} size={50}
+                    fmt={fmtDb} onChange={v => setMusicaParams(p => ({ ...p, nivel_db: Math.round(v) }))} />
+                  <VintageKnob label="TOM" min={-12} max={12} value={musicaParams.eq_db} size={50}
+                    fmt={fmtDb} onChange={v => setMusicaParams(p => ({ ...p, eq_db: Math.round(v) }))} />
+                  <VintageKnob label="RVB" min={0} max={1} value={musicaParams.reverb_wet} size={50}
+                    fmt={fmtPct} onChange={v => setMusicaParams(p => ({ ...p, reverb_wet: Math.round(v * 20) / 20 }))} />
+                </div>
+              </div>
+            )}
             <input value={buscaMusica} onChange={e => setBuscaMusica(e.target.value)}
               placeholder="buscar música" spellCheck={false} style={campo} />
             <ul aria-label="músicas" style={lista}>
@@ -586,7 +779,13 @@ export function Mix() {
                       return (
                         <li key={f.caminho}>
                           <button type="button" className="mix-btn mix-linha" aria-pressed={ativo}
-                            onClick={() => setMusica(ativo ? null : f)}
+                            onClick={() => {
+                              setMusica(ativo ? null : f)
+                              // troca de música: parâmetros da música voltam ao zero — um mix
+                              // salvo (abrirMix) reaplica os dele logo em seguida
+                              setMusicaParams(MUSICA_PARAMS_ZERO)
+                              setAtrasoCamadas(0)
+                            }}
                             style={{ ...linha, color: ativo ? 'var(--vintage-value)' : 'var(--vintage-label)' }}>
                             <span style={{ flex: 1 }}>{f.nome}</span>
                             <span style={{ color: 'var(--vintage-text-dim)', minWidth: 44, textAlign: 'right' }}>{mmss(f.dur_s)}</span>
@@ -609,8 +808,60 @@ export function Mix() {
             // coluna, acompanhando a altura da ambiência ao lado em vez de sobrar vazio
             <section style={{ ...painel, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
               <span style={rotulo}>3 · visual do loop de 1h — footage já usado no canal</span>
-              <SeletorCategorias grupoLabel="categorias do visual" todas={Object.keys(contagemVisual).sort()} contagem={contagemVisual}
-                ativos={catsVisual} onToggle={alternaCatVisual} icones={ICONE_VISUAL} rotuloVazio="categoria" />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <SeletorCategorias grupoLabel="categorias do visual" todas={Object.keys(contagemVisual).sort()} contagem={contagemVisual}
+                  ativos={catsVisual} onToggle={alternaCatVisual} icones={ICONE_VISUAL} rotuloVazio="categoria" />
+                {/* pasta de input: alem da fixa, escolhe outras na hora — sem editar
+                    visual_catalog.py e rodar CLI toda vez que sobra footage novo */}
+                <Popover open={pastasAbertas} onOpenChange={setPastasAbertas}>
+                  <PopoverTrigger asChild>
+                    <button type="button" className="mix-btn" style={botaoIcone(pastasVisuais.length > 0)}>
+                      <FolderPlus size={12} /> pasta{pastasVisuais.length > 0 ? ` (${pastasVisuais.length})` : ''}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-80 border-vintage-border bg-vintage-surface-2 p-3 text-vintage-label">
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <span style={{ ...rotulo, color: 'var(--vintage-text-dim)' }}>
+                        caminho da pasta no disco — entra na varredura junto da fixa
+                      </span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input value={novaPasta} onChange={e => setNovaPasta(e.target.value)}
+                          placeholder="Z:\caminho\da\pasta" spellCheck={false}
+                          onKeyDown={e => { if (e.key === 'Enter') void adicionarPastaVisual() }}
+                          style={{ ...campo, padding: '7px 9px' }} />
+                        <button type="button" className="mix-btn" disabled={!novaPasta.trim() || pastaJob?.status === 'running'}
+                          onClick={() => void adicionarPastaVisual()}
+                          style={botao(false, !novaPasta.trim() || pastaJob?.status === 'running')}>
+                          {pastaJob?.status === 'running' ? '…' : 'add'}
+                        </button>
+                      </div>
+                      {pastaJob?.status === 'error' && (
+                        <span style={{ color: 'var(--vintage-label)' }}>{pastaJob.error}</span>
+                      )}
+                      {pastasVisuais.length > 0 && (
+                        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 4 }}>
+                          {pastasVisuais.map(p => (
+                            <li key={p.pasta} style={{
+                              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px',
+                              background: 'var(--vintage-surface-3)', border: '1px solid var(--vintage-border)',
+                            }}>
+                              <span style={{
+                                flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap', color: 'var(--vintage-label)',
+                              }} title={p.pasta}>{p.pasta}</span>
+                              <button type="button" className="mix-btn" aria-label={`tirar pasta ${p.pasta}`}
+                                title="tirar do catálogo" onClick={() => void removerPastaVisual(p.pasta)}
+                                disabled={pastaJob?.status === 'running'} style={{ ...botaoTirar, position: 'static' }}>
+                                <X size={12} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
               <div style={{
                 display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
                 gap: 8, gridAutoRows: 'min-content', flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 2,
@@ -652,7 +903,7 @@ export function Mix() {
           <section style={painel}>
             <span style={rotulo}>2 · ambiência — o zero do nível é o limiar da casa</span>
             {camadas.length > 0 && (
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10 }}>
                 {camadas.map((c, i) => {
                   const a = porId.get(c.id)
                   return (
@@ -664,31 +915,62 @@ export function Mix() {
                       {/* camada 3+ cicla pelos dois papéis testados (lugar/textura), mesma
                           regra do backend — não inventa um terceiro papel */}
                       <span style={rotulo}>{PAPEL[i % PAPEL.length]}</span>
-                      <span style={{ color: 'var(--vintage-value)', paddingRight: 20 }}>{a?.titulo ?? c.id}</span>
-                      <div style={{ display: 'flex', gap: 10 }}>
+                      <span title={a?.titulo ?? c.id} style={{
+                        color: 'var(--vintage-value)', paddingRight: 20, width: '100%',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{a?.titulo ?? c.id}</span>
+                      <div style={{
+                        display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                        justifyItems: 'center', gap: 6, width: '100%',
+                      }}>
                         {/* -60..+12: o zero e o limiar da casa, mas o fader tem que alcancar
                             silencio de verdade — com -12 de piso uma fonte gravada quente
                             nunca sumia, so o mudo resolvia. */}
-                        <VintageKnob label="NÍVEL" min={-60} max={12} value={c.nivel_db} size={68}
+                        <VintageKnob label="NÍVEL" min={-60} max={12} value={c.nivel_db} size={50}
                           fmt={fmtDb} onChange={v => ajusta(c.id, { nivel_db: Math.round(v) })} />
                         {/* silêncio entre uma volta e a próxima — textura que é evento isolado
-                            (canto, rajada) não deveria tocar colada nela mesma */}
-                        <VintageKnob label="GAP" min={0} max={60} value={c.gap_s} size={68}
+                            (canto, rajada) não deveria tocar colada nela mesma. até 300s: 60
+                            era curto demais pra textura de evento raro (um trovão, uma rajada) */}
+                        <VintageKnob label="GAP" min={0} max={300} value={c.gap_s} size={50}
                           fmt={fmtS} onChange={v => ajusta(c.id, { gap_s: Math.round(v) })} />
+                        {/* tom — mesmo shelf bipolar do /eq (dsp/domar.py), um só knob:
+                            negativo escurece, positivo clareia */}
+                        <VintageKnob label="TOM" min={-12} max={12} value={c.eq_db ?? 0} size={50}
+                          fmt={fmtDb} onChange={v => ajusta(c.id, { eq_db: Math.round(v) })} />
+                        {/* reverb — mesma sala (IR) do /eq, só a quantidade é knob aqui */}
+                        <VintageKnob label="RVB" min={0} max={1} value={c.reverb_wet ?? 0} size={50}
+                          fmt={fmtPct} onChange={v => ajusta(c.id, { reverb_wet: Math.round(v * 20) / 20 })} />
                       </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button type="button" className="mix-btn" aria-pressed={mudo.has(c.id)} title="mudo só no preview do browser"
-                          onClick={() => alternaMudo(c.id)} style={botaoIcone(mudo.has(c.id))}>
+                      {/* mudo e respira: mesmo peso visual — dois toggles ícone-só lado a lado,
+                          esticados pra ocupar a largura do card (em vez de dois quadrados
+                          pequenos encostados na esquerda, com o resto do card vazio) */}
+                      <div style={{ display: 'flex', gap: 6, width: '100%' }}>
+                        <button type="button" className="mix-btn" aria-pressed={mudo.has(c.id)} aria-label="mudo"
+                          title="mudo só no preview do browser"
+                          onClick={() => alternaMudo(c.id)} style={{ ...botaoIcone(mudo.has(c.id)), flex: 1, justifyContent: 'center' }}>
                           {mudo.has(c.id) ? <VolumeX size={14} /> : <Volume2 size={14} />}
                         </button>
-                        <button type="button" className="mix-btn" aria-pressed={c.respira} title="respira: leve variação de volume ao longo do loop"
-                          onClick={() => ajusta(c.id, { respira: !c.respira })} style={botaoIcone(c.respira)}>
-                          <Wind size={14} /> respira
+                        <button type="button" className="mix-btn" aria-pressed={c.respira} aria-label="respira"
+                          title="respira: leve variação de volume ao longo do loop"
+                          onClick={() => ajusta(c.id, { respira: !c.respira })} style={{ ...botaoIcone(c.respira), flex: 1, justifyContent: 'center' }}>
+                          <Wind size={14} />
                         </button>
                       </div>
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {camadas.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* entrada escalonada: camada i começa i*atraso depois — evita todas as
+                    texturas disparando no mesmo instante (estoura CPU/áudio no browser) */}
+                <VintageKnob label="ATRASO" min={0} max={10} value={atrasoCamadas} size={44}
+                  fmt={fmtAtraso} onChange={v => setAtrasoCamadas(Math.round(v * 2) / 2)} />
+                <span style={{ ...rotulo, color: 'var(--vintage-text-dim)' }}>
+                  entre o início de uma camada e a próxima
+                </span>
               </div>
             )}
 
@@ -894,9 +1176,19 @@ export function Mix() {
             label={
               job?.compondo ? 'compondo vídeo'
                 : rodando ? `renderizando ${Math.round(job?.progress ?? 0)}%`
-                : job?.status === 'done' ? 'pronto' : 'parado'
+                : job?.status === 'done' ? 'pronto'
+                : job?.status === 'cancelado' ? 'cancelado' : 'parado'
             }
           />
+          {/* só aparece com um render/export de verdade em andamento — parar um preview de
+              30 s não vale a pena, ele já é rápido; export de 1h/3h é o caso que trava */}
+          {rodando && jobId && (
+            <button type="button" className="mix-btn" onClick={() => void cancelarExport()}
+              disabled={cancelando} title="parar o render em andamento"
+              style={{ ...botaoIcone(false), padding: '10px 14px' }}>
+              <Square size={12} /> {cancelando ? 'cancelando…' : 'cancelar'}
+            </button>
+          )}
           <button type="button" className="mix-btn" disabled={!pronto} onClick={() => void renderizar(true)}
             style={{ ...botao(false, !pronto), marginLeft: 'auto', padding: '12px 18px' }}>
             preview {PREVIEW_S} s

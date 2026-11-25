@@ -43,7 +43,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as EventoTecla, ReactNode } from 'react'
 import * as Tone from 'tone'
-import { WHITE_NOTES, NOTE_CENTS, KEY_NOTE, BLACK_KEYS } from '../lib/notes'
+import { WHITE_NOTES, NOTE_CENTS, KEY_NOTE, KEY_BLACK, BLACK_KEYS } from '../lib/notes'
 import type { WhiteNote } from '../lib/notes'
 import { getSharedAudioContext, createCaptureDestination } from '../lib/audio-context'
 import { createFxChain, updateFxChain, disposeFxChain, FX_DEFAULTS } from '../lib/fx-rack'
@@ -67,13 +67,16 @@ type Tecla = { id: string; cents: number; atalho?: string }
 const TECLA_POR_ATALHO: Record<string, string> = {}
 const ATALHO_POR_NOTA: Record<string, string> = {}
 for (const [k, n] of Object.entries(KEY_NOTE)) { TECLA_POR_ATALHO[k] = n; ATALHO_POR_NOTA[n] = k }
+// as pretas entram no MESMO mapa, então o listener de teclado, o rótulo desenhado na
+// tecla e o nome acessível saem de graça — nenhum deles precisou saber que mudou algo
+for (const [k, n] of Object.entries(KEY_BLACK)) { TECLA_POR_ATALHO[k] = n; ATALHO_POR_NOTA[n] = k }
 
 const BRANCAS: Tecla[] = WHITE_NOTES.map(n => ({
   id: n, cents: NOTE_CENTS[n as WhiteNote], atalho: ATALHO_POR_NOTA[n],
 }))
 
 const PRETAS: (Tecla & { afterWhite: number })[] = BLACK_KEYS.map(b => ({
-  id: b.label, cents: b.cents, afterWhite: b.afterWhite,
+  id: b.label, cents: b.cents, afterWhite: b.afterWhite, atalho: ATALHO_POR_NOTA[b.label],
 }))
 
 const CENTS_POR_ID: Record<string, number> = {}
@@ -245,6 +248,15 @@ const PRESET_ETEREO = PRESETS.find(p => p.id === 'etereo')!
  */
 export type ModoTocar = 'completo' | 'etereo'
 
+/**
+ * O que define a VOZ de uma camada, e só isso.
+ *
+ * Preset + sample é o que muda o timbre de verdade; o resto (ADSR, LFO, rack) vem do
+ * preset. Guardar knob por knob faria o arquivo salvo envelhecer junto com a lista de
+ * parâmetros, e reabrir uma mesa de mês passado viraria arqueologia.
+ */
+export type EstadoCamada = { presetId: string; samplePath: string | null }
+
 /** Transposição do modo, em cents. Uma oitava acima no etéreo. */
 const TRANSPOR: Record<ModoTocar, number> = { completo: 0, etereo: 1200 }
 
@@ -285,11 +297,35 @@ type Origem = 'disco' | 'acervo'
 type ItemAcervo = { nome: string; caminho: string; pasta: string; bytes: number }
 type EstadoAcervo = 'ocioso' | 'carregando' | 'pronto' | 'erro'
 
+/**
+ * Como a linha chama o arquivo.
+ *
+ * O acervo veio de mil lugares e o nome cru é a verdade — menos em `vintage`, que é a
+ * única pasta com nome CURADO por nós (`taca-de-vidro.wav`). Ali o slug é ruído: some a
+ * extensão e o hífen vira espaço. Nas outras pastas o nome fica como está, porque ele é a
+ * única pista da procedência.
+ */
+function rotuloDoItem(item: { nome: string; pasta: string }): string {
+  if (item.pasta !== 'vintage') return item.nome
+  return item.nome.replace(/\.[^.]+$/, '').replace(/-/g, ' ')
+}
+
 const ACERVO_LIMITE_MB = 60
 const ACERVO_LIMITE = ACERVO_LIMITE_MB * 1024 * 1024
 /** Teto de linhas desenhadas de uma vez. Acima disto quem filtra é a busca. */
 const ACERVO_MOSTRA_MAX = 150
 const ACERVO_ALTURA = 240
+/** Largura da gaveta. Cabe a lista e o nome longo de pasta sem comer a tela. */
+const ACERVO_LARGURA = 420
+/**
+ * Quantas pílulas de pasta aparecem antes do "+N".
+ *
+ * O acervo real tem **2797 arquivos em dezenas de pastas** (`SAMPLES/DIRT/*` sozinho tem
+ * umas quarenta). Desenhar todas vira parede, e parede empurra a lista pra fora — o mesmo
+ * defeito que este painel existe pra resolver. As 10 maiores cobrem o uso, e o resto se
+ * alcança pelo "+N" ou digitando o nome da pasta na busca, que já filtra por pasta.
+ */
+const ACERVO_PASTAS_MAX = 10
 
 /* ── microfone: a outra fonte de entrada ─────────────────────────────
  * O mic não é uma voz do teclado, é uma ENTRADA, e por isso ele mora na faixa de
@@ -400,9 +436,24 @@ function focoDeTeclado(el: HTMLElement): boolean {
   try { return el.matches(':focus-visible') } catch { return true }
 }
 
-export function Tocar({ onGravado, modo = 'completo' }: {
+export function Tocar({
+  onGravado, modo = 'completo', ligada = true, semGravacao = false,
+  estadoInicial, onEstado,
+}: {
   onGravado: (path: string, durSeg: number) => void
   modo?: ModoTocar
+  /**
+   * Camada no ar ou em pausa. Pausa aqui e MUDO, nao parada: as notas seguradas
+   * continuam de pe por baixo e voltam inteiras quando religa. Numa cama, trazer a
+   * camada de volta e abrir o fader — refazer o acorde seria outra coisa.
+   */
+  ligada?: boolean
+  /** Numa grade quem grava e a mesa, no stream master. Esconde a faixa daqui. */
+  semGravacao?: boolean
+  /** Mesa salva reabrindo: a voz que esta camada tinha. */
+  estadoInicial?: EstadoCamada
+  /** Avisa a mesa quando a voz muda, pra ela ter o que salvar. */
+  onEstado?: (e: EstadoCamada) => void
 }) {
   /* O modo não muda durante a vida do componente (ele vem da rota), então a voz
      inicial é calculada uma vez e guardada em ref — `garantirMotor` monta a cadeia
@@ -437,6 +488,33 @@ export function Tocar({ onGravado, modo = 'completo' }: {
   const [estadoAcervo, setEstadoAcervo] = useState<EstadoAcervo>('ocioso')
   const [erroAcervo, setErroAcervo] = useState('')
   const [busca, setBusca] = useState('')
+  /* Pasta escolhida no acervo; `null` é tudo. Busca por texto resolve quando se sabe o
+     nome — não resolve quando se quer VER o que tem de um tipo. O acervo tem 200+ arquivos
+     e a esmagadora maioria é bateria, FX e render: os 12 instrumentos afinados sumiam. */
+  const [pastaSel, setPastaSel] = useState<string | null>(null)
+  const [todasPastas, setTodasPastas] = useState(false)
+  const [samplePath, setSamplePath] = useState<string | null>(estadoInicial?.samplePath ?? null)
+
+  /* Relata a voz pra mesa sempre que ela muda. Só preset e sample: ver `EstadoCamada`. */
+  const onEstadoRef = useRef(onEstado)
+  onEstadoRef.current = onEstado
+  useEffect(() => {
+    onEstadoRef.current?.({ presetId, samplePath })
+  }, [presetId, samplePath])
+
+  /* Mesa reaberta: recarrega o sample que a camada tinha. Roda UMA vez — depois disso
+     quem manda é o usuário, e reagir a `estadoInicial` de novo desfaria o que ele fez. */
+  const restauradoRef = useRef(false)
+  useEffect(() => {
+    const alvo = estadoInicial?.samplePath
+    if (restauradoRef.current || !alvo) return
+    restauradoRef.current = true
+    void carregarDoAcervo({
+      nome: alvo.split(/[\/]/).pop() ?? alvo, caminho: alvo,
+      pasta: '', bytes: 0,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /* sequenciador — a grade guarda sempre 8 passos; `nPassos` só decide quantos valem */
   const [passos, setPassos] = useState<string[][]>(() => Array.from({ length: SEQ_MAX_PASSOS }, () => [] as string[]))
@@ -462,6 +540,20 @@ export function Tocar({ onGravado, modo = 'completo' }: {
   const [midiNome, setMidiNome] = useState<string | null>(null)
   /** ESTICADO REAL só existe durante a gravação e logo depois dela. */
   const [mostraEsticado, setMostraEsticado] = useState(false)
+
+  /* ── notas tocadas, além do áudio ──────────────────────────────────
+     A mesma gravação rende duas coisas: o WAV (que vai pro Paulstretch) e as NOTAS.
+     O áudio já esticado é textura; as notas são melodia, e é delas que o motor φ da
+     era 5 precisa pra aplicar forma, timbre e efeito em cima sem re-sintetizar nada.
+     Capturado direto no notaOn/notaOff, que é onde a voz nasce e morre de verdade —
+     no latch (DRONE) a tecla é interruptor, então ler o keydown daria nota errada. */
+  type NotaGravada = { noteName: string; cents: number; timeMs: number; durationMs: number; velocity: number }
+  const [midiEstado, setMidiEstado] = useState<'vazio' | 'pronto' | 'salvando' | 'salvo' | 'erro'>('vazio')
+  const [midiPath, setMidiPath] = useState<string | null>(null)
+  const notasGravadasRef = useRef<NotaGravada[]>([])
+  const notasAbertasRef = useRef<Map<string, { t: number; cents: number; vel: number }>>(new Map())
+  const gravInicioRef = useRef(0)
+  const gravandoRef = useRef(false)
 
   /* refs — o áudio não pode depender do ciclo de render */
   const chainRef = useRef<FxChain | null>(null)
@@ -559,6 +651,13 @@ export function Tocar({ onGravado, modo = 'completo' }: {
     const centsReais = cents + transporRef.current
     const hz = centsParaHz(centsReais)
 
+    // grava a altura que SOA (já transposta), não a tecla apertada
+    if (gravandoRef.current) {
+      notasAbertasRef.current.set(id, {
+        t: performance.now() - gravInicioRef.current, cents: centsReais, vel: velocidade,
+      })
+    }
+
     const gain = ctx.createGain()
     gain.gain.setValueAtTime(0.0001, agora)
     const pico = GANHO_BASE * velocidade
@@ -615,6 +714,18 @@ export function Tocar({ onGravado, modo = 'completo' }: {
     const viva = vivas.get(id)
     if (!viva) return
     vivas.delete(id)
+
+    if (gravandoRef.current) {
+      const ini = notasAbertasRef.current.get(id)
+      if (ini) {
+        notasAbertasRef.current.delete(id)
+        notasGravadasRef.current.push({
+          noteName: id, cents: ini.cents, timeMs: ini.t, velocity: ini.vel,
+          durationMs: Math.max(performance.now() - gravInicioRef.current - ini.t, 30),
+        })
+      }
+    }
+
     const ctx = getSharedAudioContext()
     const agora = ctx.currentTime
     const rel = Math.max(0.05, viva.release)
@@ -687,6 +798,7 @@ export function Tocar({ onGravado, modo = 'completo' }: {
   }, [silenciarTudo])
 
   const descarregarSample = useCallback(() => {
+    setSamplePath(null)
     silenciarTudo()
     sampleRef.current = null
     setSample(null)
@@ -720,6 +832,10 @@ export function Tocar({ onGravado, modo = 'completo' }: {
         })
       }
       setAcervo(itens)
+      /* Abre já em `vintage` quando ela existe: é a única pasta de instrumento AFINADO
+         do acervo, e quem abriu este painel abriu pra trocar o som do teclado. O resto
+         (bateria, FX, render) continua a um clique em TUDO. */
+      setPastaSel(itens.some(i => i.pasta === 'vintage') ? 'vintage' : null)
       setEstadoAcervo('pronto')
     } catch (e) {
       setAcervo(null)
@@ -738,6 +854,9 @@ export function Tocar({ onGravado, modo = 'completo' }: {
    */
   const carregarDoAcervo = useCallback(async (item: ItemAcervo) => {
     if (item.bytes > ACERVO_LIMITE) return
+    /* O CAMINHO, não o nome: é ele que reabre a camada numa mesa salva. Dois arquivos
+       com o mesmo nome em pastas diferentes existem de montão neste acervo. */
+    setSamplePath(item.caminho)
     const carga = ++cargaRef.current
     setAcervoAberto(false)
     setOrigem('acervo')
@@ -764,6 +883,40 @@ export function Tocar({ onGravado, modo = 'completo' }: {
   }, [silenciarTudo])
 
   /** Abrir o painel é o gesto da pílula. A lista só é buscada na primeira vez. */
+  /**
+   * Sorteia um sample e carrega, sem abrir nada.
+   *
+   * Sorteia dentro do que está FILTRADO (pasta + busca), não no acervo inteiro: sorteio
+   * entre 2797 arquivos cairia num hat de bateria nove em cada dez vezes, e quem apertou
+   * queria trocar a voz do teclado. Como o painel abre em `vintage`, o padrão é sortear
+   * instrumento.
+   *
+   * Nunca repete o que já está tocando — sorteio que devolve o mesmo som lê como botão
+   * quebrado.
+   */
+  const sortearSample = useCallback(() => {
+    const pool = (acervo ?? []).filter(i =>
+      i.bytes <= ACERVO_LIMITE
+      && (pastaSel === null || (i.pasta || '(raiz)') === pastaSel)
+      && i.nome !== sample?.nome)
+    if (pool.length === 0) return
+    void carregarDoAcervo(pool[Math.floor(Math.random() * pool.length)])
+  }, [acervo, pastaSel, sample?.nome, carregarDoAcervo])
+
+  /** Sortear com o acervo ainda não lido: busca e sorteia quando chegar. */
+  const [sorteioPendente, setSorteioPendente] = useState(false)
+  const pedirSorteio = useCallback(() => {
+    if (acervo) { sortearSample(); return }
+    setSorteioPendente(true)
+    void buscarAcervo()
+  }, [acervo, sortearSample, buscarAcervo])
+
+  useEffect(() => {
+    if (!sorteioPendente || !acervo) return
+    setSorteioPendente(false)
+    sortearSample()
+  }, [sorteioPendente, acervo, sortearSample])
+
   const alternarAcervo = useCallback(() => {
     setAcervoAberto(aberto => {
       if (aberto) return false
@@ -988,13 +1141,16 @@ export function Tocar({ onGravado, modo = 'completo' }: {
     setSeqRodando(false)   // troca de preset para a sequência: o timer não sobrevive à voz
     setVoz(p.voz)
     vozParamsRef.current = p.voz
-    if (chainRef.current) updateFxChain(chainRef.current, { ...p.fx, vol }, 0.4)
+    if (chainRef.current) updateFxChain(chainRef.current, { ...p.fx, vol: ligada ? vol : 0 }, 0.4)
     if (lfoRef.current) updateLFO(lfoRef.current, { lfoRate: p.voz.lfoRate, lfoDepth: p.voz.lfoDepth })
-  }, [vol])
+  }, [vol, ligada])
 
+  /* O `vol` do painel e a pausa da camada terminam no MESMO ganho de saida, entao
+     saem daqui juntos — duas escritas concorrentes no `outputGain` dariam o bug
+     classico de "abaixei o volume e a pausa trouxe ele de volta no talo". */
   useEffect(() => {
-    if (chainRef.current) updateFxChain(chainRef.current, { vol }, 0.1)
-  }, [vol])
+    if (chainRef.current) updateFxChain(chainRef.current, { vol: ligada ? vol : 0 }, 0.1)
+  }, [vol, ligada])
 
   useEffect(() => {
     if (lfoRef.current) updateLFO(lfoRef.current, { lfoRate: voz.lfoRate, lfoDepth: voz.lfoDepth })
@@ -1114,6 +1270,11 @@ export function Tocar({ onGravado, modo = 'completo' }: {
     rec.start(250)
     recRef.current = rec
     t0Ref.current = Date.now()
+    notasGravadasRef.current = []
+    notasAbertasRef.current.clear()
+    gravInicioRef.current = performance.now()
+    gravandoRef.current = true
+    setMidiEstado('vazio'); setMidiPath(null)
     setDecorrido(0); setErroMsg(''); setEstado('gravando'); setGravando(true)
     timerRef.current = window.setInterval(() => setDecorrido((Date.now() - t0Ref.current) / 1000), 200)
   }
@@ -1124,6 +1285,42 @@ export function Tocar({ onGravado, modo = 'completo' }: {
     if (rec && rec.state !== 'inactive') { try { rec.stop() } catch { /* noop */ } }
     recRef.current = null
     setGravando(false)
+
+    // fecha o que ficou de pé: acorde segurado no fim (e o DRONE deixa de propósito)
+    const fim = performance.now() - gravInicioRef.current
+    notasAbertasRef.current.forEach((ini, id) => {
+      notasGravadasRef.current.push({
+        noteName: id, cents: ini.cents, timeMs: ini.t, velocity: ini.vel,
+        durationMs: Math.max(fim - ini.t, 30),
+      })
+    })
+    notasAbertasRef.current.clear()
+    gravandoRef.current = false
+    setMidiEstado(notasGravadasRef.current.length > 0 ? 'pronto' : 'vazio')
+  }
+
+  /**
+   * Manda as notas da última gravação pro backend virarem .mid na pasta que o
+   * `render.py` da era 5 lê. Não substitui o upload do áudio — o áudio vira textura
+   * no Paulstretch, as notas viram melodia no motor φ. A mesma passada rende os dois.
+   */
+  async function salvarMidi() {
+    const eventos = notasGravadasRef.current
+    if (eventos.length === 0) return
+    setMidiEstado('salvando')
+    try {
+      const res = await fetch(resolveUrl('/api/midi/save'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventos, lenMs: Math.round(decorrido * 1000) }),
+      })
+      if (!res.ok) { setMidiEstado('erro'); return }
+      const info = await res.json()
+      setMidiPath(info.path ?? null)
+      setMidiEstado('salvo')
+    } catch {
+      setMidiEstado('erro')
+    }
   }
 
   /* ── leituras ─────────────────────────────────────────────────── */
@@ -1160,14 +1357,42 @@ export function Tocar({ onGravado, modo = 'completo' }: {
      próprio medidor segura ele mais um pouco depois da última. Não pisca por nota. */
   const mostraPulso = acesas.size > 0 || ataquesPorSeg > 0
 
+  /* As pastas que existem AGORA, contadas. Sai do dado e não de uma lista escrita à mão:
+     quando `vintage_vcsl.py` trouxer mais instrumento, a pílula já sabe. `vintage` vem
+     primeiro porque é o único material afinado do acervo — é o que o teclado toca. */
+  const pastas = useMemo(() => {
+    if (!acervo) return [] as { nome: string; n: number }[]
+    const conta = new Map<string, number>()
+    for (const i of acervo) {
+      const p = i.pasta || '(raiz)'
+      conta.set(p, (conta.get(p) ?? 0) + 1)
+    }
+    return [...conta.entries()]
+      .map(([nome, n]) => ({ nome, n }))
+      .sort((a, b) => (a.nome === 'vintage' ? -1 : b.nome === 'vintage' ? 1 : b.n - a.n))
+  }, [acervo])
+
+  /* A pasta escolhida entra na lista curta mesmo fora do top 10: some a pílula que
+     está ligada seria perder a única pista de onde a lista veio. */
+  const pastasVisiveis = useMemo(() => {
+    if (todasPastas) return pastas
+    const curtas = pastas.slice(0, ACERVO_PASTAS_MAX)
+    if (pastaSel && !curtas.some(p => p.nome === pastaSel)) {
+      const achada = pastas.find(p => p.nome === pastaSel)
+      if (achada) return [...curtas, achada]
+    }
+    return curtas
+  }, [pastas, todasPastas, pastaSel])
+
   /* A busca filtra por nome E por pasta, porque o acervo está organizado em pasta
-     e é assim que o dono lembra do material. */
+     e é assim que o dono lembra do material. A pílula de pasta estreita antes. */
   const filtrados = useMemo(() => {
     if (!acervo) return []
     const q = busca.trim().toLowerCase()
-    if (!q) return acervo
-    return acervo.filter(i => i.nome.toLowerCase().includes(q) || i.pasta.toLowerCase().includes(q))
-  }, [acervo, busca])
+    const base = pastaSel === null ? acervo : acervo.filter(i => (i.pasta || '(raiz)') === pastaSel)
+    if (!q) return base
+    return base.filter(i => i.nome.toLowerCase().includes(q) || i.pasta.toLowerCase().includes(q))
+  }, [acervo, busca, pastaSel])
   const cortados = Math.max(0, filtrados.length - ACERVO_MOSTRA_MAX)
 
   return (
@@ -1269,6 +1494,31 @@ export function Tocar({ onGravado, modo = 'completo' }: {
               }}>×</button>
           )}
         </div>
+
+        {/* ── sorteio ───────────────────────────────────────────────────
+            A pílula SAMPLE serve pra ESCOLHER. Este serve pra NÃO escolher — que é o
+            gesto de quem está procurando timbre, não procurando arquivo. Sorteia
+            dentro do que está filtrado (a gaveta abre em `vintage`), então o padrão é
+            cair em instrumento e não num hat de bateria.
+
+            Sem texto de propósito: ele não é uma quinta voz, é um atalho pra quarta.
+            Rótulo escrito aqui competiria com as pílulas, que são as escolhas de
+            verdade. */}
+        <button
+          type="button"
+          onClick={pedirSorteio}
+          disabled={estadoSample === 'carregando'}
+          aria-label="trocar o sample ao acaso"
+          title={pastaSel ? `sorteia em ${pastaSel}` : 'sorteia no acervo'}
+          style={{
+            padding: '7px 13px', borderRadius: 999,
+            cursor: estadoSample === 'carregando' ? 'progress' : 'pointer',
+            background: 'transparent', border: `1px solid ${t12}`,
+            color: t45, font: `13px ${MONO}`, lineHeight: 1,
+            opacity: estadoSample === 'carregando' ? 0.45 : 1,
+            transition: TRANSICAO,
+          }}>⚄</button>
+
         <input
           ref={arquivoRef}
           type="file"
@@ -1299,11 +1549,24 @@ export function Tocar({ onGravado, modo = 'completo' }: {
           A lista tem altura contida de propósito: centenas de arquivos empurrando
           o teclado para fora da dobra é o oposto do que este painel resolve. */}
       {acervoAberto && (
-        <div style={{
-          border: LINHA, borderRadius: 6, background: FUNDO_ALTO,
-          padding: ESP.sm, marginBottom: ESP.md,
-          display: 'flex', flexDirection: 'column', gap: ESP.xs,
-        }}>
+        <>
+        {/* Véu: fecha no clique fora, e é o que diz que a gaveta está por cima. */}
+        <div
+          onClick={() => setAcervoAberto(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 40,
+          }}
+        />
+        <div
+          role="dialog"
+          aria-label="acervo de samples"
+          style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: ACERVO_LARGURA,
+            maxWidth: '92vw', zIndex: 41,
+            borderLeft: LINHA, background: FUNDO_ALTO,
+            padding: ESP.sm, boxSizing: 'border-box',
+            display: 'flex', flexDirection: 'column', gap: ESP.xs,
+          }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: ESP.xs }}>
             {/* `autoFocus`: quem abriu o painel abriu para procurar, e o teclado
                 físico não toca nota enquanto o foco está num campo de texto. */}
@@ -1341,10 +1604,64 @@ export function Tocar({ onGravado, modo = 'completo' }: {
               }}>×</button>
           </div>
 
+          {/* ── pasta: o filtro que a busca não dá ───────────────────────
+              Busca por texto resolve quando se SABE o nome. Não resolve "me mostra o que
+              tem de instrumento", que é a pergunta de quem vai trocar o som do teclado.
+              A contagem é o qualificador: sem ela a pílula promete sem dizer quanto.
+              Sai do dado, então instrumento novo aparece sozinho aqui. */}
+          {pastas.length > 1 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: ESP.xs, flexWrap: 'wrap',
+              maxHeight: 132, overflowY: 'auto', flex: '0 0 auto',
+            }}>
+              {[{ nome: null as string | null, n: acervo?.length ?? 0 }, ...pastasVisiveis].map(p => {
+                const sel = pastaSel === p.nome
+                return (
+                  <button
+                    key={p.nome ?? '__tudo'}
+                    type="button"
+                    onClick={() => setPastaSel(p.nome)}
+                    aria-pressed={sel}
+                    /* O rótulo e a contagem são dois elementos colados, então o nome
+                       acessível sairia "VINTAGE3". Dito por extenso aqui. */
+                    aria-label={`${p.nome ?? 'tudo'}, ${p.n} ${p.n === 1 ? 'arquivo' : 'arquivos'}`}
+                    style={{
+                      display: 'flex', alignItems: 'baseline', gap: 5,
+                      padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+                      font: `700 10px ${MONO}`, letterSpacing: '0.14em',
+                      background: sel ? ACESO_FRACO : 'transparent',
+                      border: `1px solid ${sel ? ACESO : t12}`,
+                      color: sel ? ACESO : t45,
+                      transition: TRANSICAO,
+                    }}>
+                    {(p.nome ?? 'tudo').toUpperCase()}
+                    <span style={{
+                      font: `400 10px ${MONO}`, letterSpacing: 0,
+                      color: sel ? ACESO : t25,
+                    }}>{p.n}</span>
+                  </button>
+                )
+              })}
+              {pastas.length > pastasVisiveis.length && (
+                <button
+                  type="button"
+                  onClick={() => setTodasPastas(true)}
+                  style={{
+                    padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+                    font: `700 10px ${MONO}`, letterSpacing: '0.14em',
+                    background: 'transparent', border: `1px solid ${t12}`, color: t45,
+                  }}>
+                  +{pastas.length - pastasVisiveis.length}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* A mesma caixa desenha os cinco estados da lista: lendo, sem resposta,
               acervo vazio, busca sem resultado, e a lista de verdade. */}
           <div style={{
-            height: ACERVO_ALTURA, overflowY: 'auto', overflowX: 'hidden',
+            flex: '1 1 auto', minHeight: ACERVO_ALTURA,
+            overflowY: 'auto', overflowX: 'hidden',
             border: LINHA, borderRadius: 4,
           }}>
             {estadoAcervo === 'carregando' ? (
@@ -1388,7 +1705,7 @@ export function Tocar({ onGravado, modo = 'completo' }: {
                       flex: '1 1 auto', minWidth: 0,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       color: grande ? t45 : t100,
-                    }}>{item.nome}</span>
+                    }}>{rotuloDoItem(item)}</span>
                     <span style={{
                       flex: '0 1 auto', maxWidth: '45%',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -1414,6 +1731,7 @@ export function Tocar({ onGravado, modo = 'completo' }: {
               : `o acervo mora no backend, acima de ${ACERVO_LIMITE_MB} MB não abre`}
           </span>
         </div>
+        </>
       )}
 
       {/* ── teclado: o elemento principal ──────────────────────────
@@ -1600,6 +1918,10 @@ export function Tocar({ onGravado, modo = 'completo' }: {
           SILENCIAR
         </button>
 
+        {/* Numa grade quem grava e a mesa, no stream master (todo fx chain ja sai em
+            `getMasterCaptureNode`). Tres botoes GRAVAR na tela seriam tres takes
+            diferentes do que o ouvido escuta como uma coisa so. */}
+        {!semGravacao && <>
         <button
           type="button"
           onClick={() => (gravando ? pararGravacao() : comecarGravacao())}
@@ -1622,12 +1944,54 @@ export function Tocar({ onGravado, modo = 'completo' }: {
           {gravando ? 'PARAR' : 'GRAVAR'}
         </button>
 
+        {/* As NOTAS da mesma passada, além do áudio. O arquivo é `.mid`, mas o rótulo
+            diz NOTAS e não MIDI de propósito: "MIDI" na tela se lê como APARELHO, e o dono
+            leu assim — isto aqui funciona com o teclado QWERTY comum, sem hardware nenhum.
+            Sem cor de estado (ui.ts):
+            salvo é marca preenchida + a palavra; falhou sobe ao topo da escala. O
+            número de notas é o qualificador — sem ele, "pronto" não diz o que tem. */}
+        <button
+          type="button"
+          onClick={() => void salvarMidi()}
+          disabled={gravando || midiEstado === 'vazio' || midiEstado === 'salvando'}
+          aria-label="salvar as notas que você tocou"
+          title={midiPath ?? 'Salva as notas que você tocou (arquivo .mid) em era 5/_gerador/midi'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: ESP.xs,
+            padding: '14px 18px', borderRadius: 6,
+            cursor: midiEstado === 'salvando' ? 'progress'
+              : gravando || midiEstado === 'vazio' ? 'default' : 'pointer',
+            font: `700 12px ${MONO}`, letterSpacing: '0.12em',
+            background: midiEstado === 'salvo' ? ACESO_FRACO : 'transparent',
+            border: `1px solid ${midiEstado === 'salvo' ? ACESO
+              : midiEstado === 'erro' ? t100 : midiEstado === 'pronto' ? t25 : t12}`,
+            color: midiEstado === 'salvo' ? ACESO
+              : midiEstado === 'erro' ? t100 : midiEstado === 'pronto' ? t70 : t45,
+            transition: TRANSICAO,
+          }}>
+          <span style={{
+            width: 11, height: 11, borderRadius: 2,
+            background: midiEstado === 'salvo' ? ACESO : 'transparent',
+            border: `1px solid ${midiEstado === 'salvo' ? ACESO
+              : midiEstado === 'erro' ? t100 : t45}`,
+          }} />
+          {midiEstado === 'salvo' ? 'NOTAS SALVAS'
+            : midiEstado === 'erro' ? 'NOTAS FALHOU'
+            : midiEstado === 'salvando' ? 'NOTAS…' : 'SALVAR NOTAS'}
+          {midiEstado === 'pronto' && (
+            <span style={{ font: `400 11px ${MONO}`, color: t45, letterSpacing: 0 }}>
+              {notasGravadasRef.current.length} notas
+            </span>
+          )}
+        </button>
+        </>}
+
         {/* MIC: fonte de ENTRADA, não voz do teclado, por isso ele mora aqui e não
             na linha das pílulas. Quatro desenhos do mesmo botão: apagado (círculo
             vazado), pedindo (apagado e sem toque, o rótulo diz o que se espera),
             ligado (marca preenchida e barrinha de nível ao vivo) e negado (marca
             vazada no topo da escala, com a linha de baixo dizendo o que houve). */}
-        {modo === 'completo' && <button
+        {modo === 'completo' && !semGravacao && <button
           type="button"
           onClick={() => { if (estadoMic === 'ligado') desligarMic(); else if (estadoMic !== 'pedindo') void ligarMic() }}
           aria-pressed={estadoMic === 'ligado'}

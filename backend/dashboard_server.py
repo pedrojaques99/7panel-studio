@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import json
 import os
+import time
+import re
 import threading
 from datetime import datetime
 import comtypes
@@ -496,6 +498,172 @@ def api_triagem():
         return jsonify(triar(path))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# Onde o .mid do teclado cai. E a pasta que o `render.py` da era 5 le direto, entao o
+# fluxo fecha sem passo manual: ele toca aqui, eu renderizo la.
+MIDI_DESTINO = os.path.join('Z:\\', 'jaques.dsgn', 'sfx_music', 'Jac\u00e3o Ambients',
+                            'era 5', '_gerador', 'midi')
+
+
+def _slug(nome, padrao='teclado'):
+    limpo = re.sub(r'[^a-zA-Z0-9\-_]+', '-', (nome or '').strip().lower()).strip('-')
+    return limpo or '%s-%s' % (padrao, time.strftime('%Y%m%d-%H%M%S'))
+
+
+@app.route('/api/midi/save', methods=['POST'])
+def api_midi_save():
+    """
+    Freestyle do SynthPanel -> .mid + .json, pro motor phi da era 5 aplicar efeito em cima.
+
+    Body: {nome, eventos:[{noteName,cents,timeMs,durationMs}], lenMs?, destino?}
+
+    O `cents` do painel e relativo a C4 (C4=0, A4=900), entao `midi = 60 + cents/100` e
+    exato — inclusive fracionario, se o painel estiver desafinado. O .mid guarda o semitom
+    arredondado (e o que o formato aceita, e e o que abre em qualquer editor); o .json ao
+    lado guarda o valor FRACIONARIO, porque `nota()` do phi.py aceita midi float e a serie
+    liminal usa microafinacao (a cadencia da amanha-adiado fecha 13 cents abaixo).
+
+    O writer de .mid esta escrito aqui em vez de importado de `era 5/_gerador/melodia.py`
+    de proposito: importar por caminho absoluto de outro repo quebra o backend inteiro se
+    aquela pasta mudar de lugar. Formato MIDI e estavel; a duplicacao custa menos.
+    """
+    import mido
+
+    body = request.get_json(silent=True) or {}
+    eventos = body.get('eventos') or []
+    if not eventos:
+        return jsonify({'error': 'nenhuma nota gravada'}), 400
+
+    destino = body.get('destino') or MIDI_DESTINO
+    try:
+        os.makedirs(destino, exist_ok=True)
+    except Exception as e:
+        return jsonify({'error': 'destino invalido: %s' % e}), 400
+
+    nome = _slug(body.get('nome'))
+    alvo_mid = os.path.join(destino, nome + '.mid')
+    alvo_json = os.path.join(destino, nome + '.json')
+
+    notas = []
+    for ev in eventos:
+        try:
+            t0 = float(ev.get('timeMs', 0)) / 1000.0
+            dur = max(float(ev.get('durationMs', 0)) / 1000.0, 0.03)
+            midi_f = 60.0 + float(ev.get('cents', 0)) / 100.0
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= midi_f <= 127):
+            continue
+        notas.append({'t0': t0, 'midi': midi_f, 'dur': dur,
+                      'vel': float(ev.get('velocity', 0.8)),
+                      'nome': ev.get('noteName', '')})
+    if not notas:
+        return jsonify({'error': 'nenhuma nota valida'}), 400
+    notas.sort(key=lambda x: x['t0'])
+
+    # 60 BPM: 1 batida = 1 segundo, entao tick vira tempo real sem conta de BPM no meio.
+    mid = mido.MidiFile()
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    tpb, upb = mid.ticks_per_beat, mido.bpm2tempo(60)
+    tr.append(mido.MetaMessage('set_tempo', tempo=upb, time=0))
+    tr.append(mido.MetaMessage('track_name', name=nome[:60], time=0))
+
+    brutos = []
+    for nt in notas:
+        alt = int(round(nt['midi']))
+        vel = max(1, min(127, int(round(nt['vel'] * 127))))
+        brutos.append((nt['t0'], 1, alt, vel))
+        brutos.append((nt['t0'] + nt['dur'], 0, alt, 0))
+    brutos.sort(key=lambda e: (e[0], e[1]))          # note_off antes de note_on no empate
+
+    anterior = 0.0
+    for t, liga, alt, vel in brutos:
+        delta = max(0, int(round(mido.second2tick(t - anterior, tpb, upb))))
+        tr.append(mido.Message('note_on' if liga else 'note_off',
+                               note=alt, velocity=vel, time=delta))
+        anterior = t
+    mid.save(alvo_mid)
+
+    dur_total = max(n['t0'] + n['dur'] for n in notas)
+    with open(alvo_json, 'w', encoding='utf-8') as f:
+        json.dump({'nome': nome, 'dur': dur_total, 'lenMs': body.get('lenMs'),
+                   'fonte': 'SynthPanel/freestyle', 'notas': notas}, f,
+                  ensure_ascii=False, indent=1)
+
+    return jsonify({'ok': True, 'path': alvo_mid, 'json': alvo_json,
+                    'nome': nome, 'notas': len(notas), 'dur': round(dur_total, 2)})
+
+
+# Onde as mesas salvas moram. Disco e nao localStorage: "musica pra re-editar" que some
+# quando ele limpa o navegador nao e musica salva.
+# Derivado do MIDI_DESTINO (.../era 5/_gerador/midi) em vez de reescrito a mao: um
+# caminho absoluto com backslash escrito duas vezes e uma chance a mais de errar, e os
+# dois vivem na mesma pasta de era.
+MESA_DIR = os.path.join(os.path.dirname(os.path.dirname(MIDI_DESTINO)), '_mesas')
+
+
+@app.route('/api/mesa/salvar', methods=['POST'])
+def api_mesa_salvar():
+    """
+    Guarda a montagem da mesa pra reabrir depois: as camadas (preset + sample + no ar) e
+    os parametros de saida. Nao guarda audio — o take ja vira arquivo pelo /api/upload, e
+    duplicar megabyte pra reabrir uma tela seria caro e desnecessario.
+    """
+    body = request.get_json(silent=True) or {}
+    nome = _slug(body.get('nome'), 'mesa')
+    dados = body.get('dados')
+    if not isinstance(dados, dict):
+        return jsonify({'error': 'faltou o objeto dados'}), 400
+    try:
+        os.makedirs(MESA_DIR, exist_ok=True)
+        alvo = os.path.join(MESA_DIR, nome + '.json')
+        with open(alvo, 'w', encoding='utf-8') as f:
+            json.dump({'nome': nome, 'salvo_em': datetime.now().isoformat(),
+                       'dados': dados}, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'ok': True, 'nome': nome, 'path': alvo})
+
+
+@app.route('/api/mesa/listar', methods=['GET'])
+def api_mesa_listar():
+    """As mesas salvas, mais nova primeiro. Com ?nome= devolve uma inteira."""
+    if not os.path.isdir(MESA_DIR):
+        return jsonify([])
+    um = (request.args.get('nome') or '').strip()
+    if um:
+        alvo = os.path.join(MESA_DIR, _slug(um) + '.json')
+        if not os.path.exists(alvo):
+            return jsonify({'error': 'nao achei %s' % um}), 404
+        with open(alvo, encoding='utf-8') as f:
+            return jsonify(json.load(f))
+    saida = []
+    for f in os.listdir(MESA_DIR):
+        if not f.endswith('.json'):
+            continue
+        caminho = os.path.join(MESA_DIR, f)
+        try:
+            with open(caminho, encoding='utf-8') as fh:
+                d = json.load(fh)
+            saida.append({'nome': d.get('nome', f[:-5]),
+                          'salvo_em': d.get('salvo_em', ''),
+                          'camadas': len((d.get('dados') or {}).get('camadas') or [])})
+        except Exception:
+            continue
+    saida.sort(key=lambda x: x['salvo_em'], reverse=True)
+    return jsonify(saida)
+
+
+@app.route('/api/mesa/apagar', methods=['POST'])
+def api_mesa_apagar():
+    nome = _slug((request.get_json(silent=True) or {}).get('nome'), '')
+    alvo = os.path.join(MESA_DIR, nome + '.json')
+    if not nome or not os.path.exists(alvo):
+        return jsonify({'error': 'nao achei'}), 404
+    os.remove(alvo)
+    return jsonify({'ok': True})
 
 
 _domar_jobs = {}
@@ -1916,8 +2084,24 @@ def bot_config():
 
 
 # ── Overlay state (briefing / ticker / timer) ────────────────────────────────
-_overlay_briefing: dict = {}
-_overlay_ticker: dict = {}
+# Briefing e ticker vão pro disco: só em memória, todo restart da API zerava o
+# estado e o /overlay/briefing do OBS ficava vazio até alguém editar o painel.
+OVERLAY_STATE_FILE = "overlay_state.json"
+
+def _load_overlay_state():
+    try:
+        with open(OVERLAY_STATE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def _save_overlay_state():
+    with open(OVERLAY_STATE_FILE, 'w', encoding='utf-8') as f:
+        json.dump({'briefing': _overlay_briefing, 'ticker': _overlay_ticker}, f, indent=2, ensure_ascii=False)
+
+_overlay_saved = _load_overlay_state()
+_overlay_briefing: dict = _overlay_saved.get('briefing', {})
+_overlay_ticker: dict = _overlay_saved.get('ticker', {})
 _overlay_timer: dict = {}   # { start: ms|null, stopped: secs|null, config: {...} }
 
 @app.route('/api/overlay/briefing', methods=['GET', 'POST'])
@@ -1925,6 +2109,7 @@ def overlay_briefing():
     global _overlay_briefing
     if request.method == 'POST':
         _overlay_briefing = request.json or {}
+        _save_overlay_state()
         return jsonify({'status': 'ok'})
     return jsonify(_overlay_briefing)
 
@@ -1933,6 +2118,7 @@ def overlay_ticker():
     global _overlay_ticker
     if request.method == 'POST':
         _overlay_ticker = request.json or {}
+        _save_overlay_state()
         return jsonify({'status': 'ok'})
     return jsonify(_overlay_ticker)
 
@@ -2101,6 +2287,14 @@ def shield_stream():
 # /mix — musica + ambiencia por cima (keyboard-ui/PLAN-rota-ambiente.md)
 from mix_routes import bp as mix_bp
 app.register_blueprint(mix_bp)
+
+# /era6 — mesa granular: banco de samples e sessões gravadas (Jacão Ambients/era6/PLANO-era6.md)
+from era6_routes import bp as era6_bp
+app.register_blueprint(era6_bp)
+
+# /final — mesa de arranjo: era5 + era6 como trilhas, melodia por cima (Jacão Ambients/PLANO-final.md)
+from final_routes import bp as final_bp
+app.register_blueprint(final_bp)
 
 if __name__ == '__main__':
     import socket, sys

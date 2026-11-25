@@ -13,6 +13,8 @@ import { Fabrica } from './fabrica/Fabrica.tsx'
 import { Eq } from './eq/Eq.tsx'
 import { Musica } from './musica/Musica.tsx'
 import { Mix } from './mix/Mix.tsx'
+import { Era6 } from './era6/Era6.tsx'
+import { Final } from './final/Final.tsx'
 import { Sequenciador } from './sequenciador/Sequenciador.tsx'
 
 const path = window.location.pathname
@@ -47,6 +49,12 @@ const views: Record<string, React.ReactNode> = {
   // música por baixo, até duas ambiências por cima (catálogo único), preview e render
   '/mix':              <Mix />,
   '/mix/':             <Mix />,
+  // mesa granular da era6: grão sobre sample real, deriva + mão, REC e export (Jacão Ambients/era6/PLANO-era6.md)
+  '/era6':             <Era6 />,
+  '/era6/':            <Era6 />,
+  // mesa de arranjo: era5 + era6 como trilhas, melodia por cima, export (Jacão Ambients/PLANO-final.md)
+  '/final':            <Final />,
+  '/final/':           <Final />,
   // partitura em grade estilo seq.halfof8, motor @jaques/padroes (Z:\Cursor\sequenciador)
   '/sequenciador':     <Sequenciador />,
   '/sequenciador/':    <Sequenciador />,

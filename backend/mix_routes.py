@@ -11,7 +11,11 @@ o DSP mora em `dsp/mix.py` (audio) e `dsp/video.py` (mux do visual escolhido).
                                   `visual_id` (so fora do preview) compoe um .mp4 irmao do
                                   audio (job.out vira o .mp4, job.audio_out guarda o audio puro)
   GET  /api/mix/status/<id>
+  POST /api/mix/cancel/<id>      pede pro render/export em andamento parar; job vira status='cancelado'
   GET  /api/mix/visuais          catalogo de video/imagem pra render de 1h (visual_catalog.json)
+  GET  /api/mix/visual-pastas    pastas extra (alem da fixa) que entram na proxima varredura
+  POST /api/mix/visual-pastas    {pasta} — adiciona e varre na hora (job de progresso, mesmo /status)
+  DELETE /api/mix/visual-pastas  {pasta} — tira e reescaneia sem ela
   GET  /api/mix/visual-pick?musica=   video escolhido pra essa musica (visual_picks.json)
   POST /api/mix/visual-pick      {musica, visual_id} — grava a escolha
   GET  /api/mix/camada-pick?musica=   ultimo combo de camadas salvo pra essa musica (camada_picks.json)
@@ -35,6 +39,7 @@ ESCOLHAS_VISUAL = os.path.join(AQUI, 'assets', 'visual_picks.json')
 ESCOLHAS_CAMADA = os.path.join(AQUI, 'assets', 'camada_picks.json')   # ultimo combo por musica
 USO_CAMADA = os.path.join(AQUI, 'assets', 'camada_uso.json')          # contagem por ambiencia, so em export real
 MIXES = os.path.join(AQUI, 'assets', 'mixes_salvos.json')             # mixes com nome, {id: mix}
+PASTAS_VISUAL = os.path.join(AQUI, 'assets', 'visual_pastas.json')    # pastas extra escolhidas pela tela
 SAIDA_DIR = os.path.join(AQUI, 'assets', 'mix')
 JACAO = os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients')
 
@@ -69,7 +74,10 @@ RAIZES = [_norm(r) for r in (
 
 def permitido(path):
     n = _norm(path)
-    return any(n == r or n.startswith(r + os.sep) for r in RAIZES)
+    # pastas extra de visual (assets/visual_pastas.json) contam como raiz tambem — senao
+    # o /file 403 no proprio video que o /visual-pastas acabou de catalogar
+    extras = [_norm(p['pasta']) for p in _le_json(PASTAS_VISUAL).get('pastas', [])]
+    return any(n == r or n.startswith(r + os.sep) for r in RAIZES + extras)
 
 
 _cache = {'mtime': None, 'doc': None}
@@ -233,6 +241,7 @@ def mix_file():
 
 
 _jobs = {}
+_processos = {}   # job_id -> {'proc': Popen|None, 'cancelado': bool} — so pros jobs de /render
 DURACAO_MAX_S = 4 * 3600
 
 
@@ -289,11 +298,32 @@ def mix_render():
         try:
             # -60: o fader do preview tambem vai ate la, pra camada ficar de fato muda
             nivel = max(-60.0, min(24.0, float(c.get('nivel_db') or 0.0)))
-            gap = max(0.0, min(120.0, float(c.get('gap_s') or 0.0)))
+            # 300 (5 min): o antigo teto de 120 cortava em silencio o que o knob do
+            # frontend ja deixava escolher ate 300 — o backend mentia o que a tela prometia
+            gap = max(0.0, min(300.0, float(c.get('gap_s') or 0.0)))
+            eq_db = max(-12.0, min(12.0, float(c.get('eq_db') or 0.0)))
+            reverb_wet = max(0.0, min(1.0, float(c.get('reverb_wet') or 0.0)))
         except (TypeError, ValueError):
-            return jsonify({'error': 'nivel_db ou gap_s invalido'}), 400
+            return jsonify({'error': 'nivel_db, gap_s, eq_db ou reverb_wet invalido'}), 400
         camadas.append(dict(item=item, fonte=fonte, nivel_db=nivel, respira=bool(c.get('respira', True)),
-                            gap_s=gap))
+                            gap_s=gap, eq_db=eq_db, reverb_wet=reverb_wet))
+
+    musica_params = None
+    mp = b.get('musica_params') or {}
+    if mp:
+        try:
+            musica_params = dict(
+                nivel_db=max(-24.0, min(24.0, float(mp.get('nivel_db') or 0.0))),
+                eq_db=max(-12.0, min(12.0, float(mp.get('eq_db') or 0.0))),
+                reverb_wet=max(0.0, min(1.0, float(mp.get('reverb_wet') or 0.0))),
+            )
+        except (TypeError, ValueError):
+            return jsonify({'error': 'musica_params invalido'}), 400
+
+    try:
+        atraso_s = max(0.0, min(10.0, float(b.get('atraso_s') or 0.0)))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'atraso_s invalido'}), 400
 
     try:
         preview_s = float(b['preview_s']) if b.get('preview_s') else None
@@ -319,11 +349,20 @@ def mix_render():
         formato = 'wav' if b.get('formato') == 'wav' else 'mp3'
         saida = _nome_saida(musica, [c['item']['id'] for c in camadas], duracao_s, formato)
     job = _jobs[job_id] = {'status': 'running', 'progress': 0, 'out': saida, 'preview': bool(preview_s)}
+    proc = _processos[job_id] = {'proc': None, 'cancelado': False}
 
     def correr():
+        from dsp.mix import Cancelado
         try:
             job.update(render(musica, camadas, saida, duracao_s=duracao_s, formato=formato,
-                              preview_s=preview_s, progresso=lambda p: job.update(progress=round(p, 1))))
+                              preview_s=preview_s, progresso=lambda p: job.update(progress=round(p, 1)),
+                              musica_params=musica_params, atraso_s=atraso_s,
+                              registrar_proc=lambda p: proc.update(proc=p),
+                              deve_cancelar=lambda: proc['cancelado']))
+            # cancelar bem na virada do render pro compor_video (que nao tem progresso
+            # incremental pra checar no meio) tambem tem que parar aqui
+            if proc['cancelado']:
+                raise Cancelado('render cancelado')
             if visual_item:
                 from dsp.video import compor_video
                 job.update(progress=99, compondo=True)
@@ -333,11 +372,37 @@ def mix_render():
             job.update(status='done', progress=100)
             if not preview_s:   # só o export de verdade conta como "esse combo funcionou"
                 registra_uso([c['item']['id'] for c in camadas])
+        except Cancelado:
+            job.update(status='cancelado')
         except Exception as e:
             job.update(status='error', error=str(e))
+        finally:
+            _processos.pop(job_id, None)
 
     threading.Thread(target=correr, daemon=True).start()
     return jsonify({'job_id': job_id, **job})
+
+
+@bp.route('/api/mix/cancel/<job_id>', methods=['POST'])
+def mix_cancel(job_id):
+    """Pede pro render/export em andamento parar. O ffmpeg do audio ve o pedido no
+    proximo ciclo do loop de progresso (`deve_cancelar`) e e morto na hora; se ja estiver
+    na fase de compor_video (sem loop de progresso pra checar), a flag e vista assim que
+    esse passo termina — nao mata o mux no meio, que e rapido (`-c:v copy`, ver dsp/video.py)."""
+    proc = _processos.get(job_id)
+    if not proc:
+        job = _jobs.get(job_id)
+        if not job:
+            return jsonify({'error': 'job not found'}), 404
+        return jsonify({'ok': True, 'ja_terminou': True, **job})   # nada rodando pra cancelar
+    proc['cancelado'] = True
+    p = proc.get('proc')
+    if p and p.poll() is None:
+        try:
+            p.terminate()
+        except OSError:
+            pass
+    return jsonify({'ok': True})
 
 
 @bp.route('/api/mix/status/<job_id>', methods=['GET'])
@@ -361,6 +426,57 @@ def mix_visuais():
     except FileNotFoundError:
         return jsonify({'error': 'catalogo visual nao gerado: rode python backend/tools/visual_catalog.py'}), 404
     return jsonify({'gerado_em': doc.get('gerado_em'), 'itens': [resumo_visual(i) for i in doc['itens']]})
+
+
+@bp.route('/api/mix/visual-pastas', methods=['GET'])
+def mix_visual_pastas_get():
+    return jsonify({'pastas': _le_json(PASTAS_VISUAL).get('pastas', [])})
+
+
+def _escanear_visual_em_thread(job_id, lista):
+    """Varre `lista` (mesmo formato do visual_pastas.json) num job — igual ao /render,
+    pra pasta grande (muitos videos, ffprobe+thumb por arquivo) nao travar a requisicao."""
+    from tools.visual_catalog import gerar
+
+    def correr():
+        try:
+            total = gerar(extra=lista, progresso=lambda p: job.update(progress=round(p, 1)))
+            _cache_visual.update(mtime=None, doc=None)   # forca o /visuais reler na hora
+            job.update(status='done', progress=100, total=total)
+        except Exception as e:
+            job.update(status='error', error=str(e))
+    job = _jobs[job_id] = {'status': 'running', 'progress': 0}
+    threading.Thread(target=correr, daemon=True).start()
+    return job
+
+
+@bp.route('/api/mix/visual-pastas', methods=['POST'])
+def mix_visual_pastas_post():
+    from tools.visual_catalog import prefixo_para
+
+    b = request.get_json(silent=True) or {}
+    pasta = (b.get('pasta') or '').strip().strip('"')
+    if not pasta or not os.path.isdir(pasta):
+        return jsonify({'error': 'pasta nao encontrada no disco: %s' % pasta}), 400
+    lista = _le_json(PASTAS_VISUAL).get('pastas', [])
+    if any(_norm(p['pasta']) == _norm(pasta) for p in lista):
+        return jsonify({'error': 'essa pasta ja esta no catalogo'}), 400
+    lista = lista + [{'pasta': pasta, 'prefixo': prefixo_para(pasta, {p.get('prefixo') for p in lista})}]
+    _grava_json(PASTAS_VISUAL, {'pastas': lista})
+    job_id = uuid.uuid4().hex[:12]
+    job = _escanear_visual_em_thread(job_id, lista)
+    return jsonify({'job_id': job_id, 'pastas': lista, **job})
+
+
+@bp.route('/api/mix/visual-pastas', methods=['DELETE'])
+def mix_visual_pastas_delete():
+    b = request.get_json(silent=True) or {}
+    pasta = (b.get('pasta') or '').strip()
+    lista = [p for p in _le_json(PASTAS_VISUAL).get('pastas', []) if _norm(p['pasta']) != _norm(pasta)]
+    _grava_json(PASTAS_VISUAL, {'pastas': lista})
+    job_id = uuid.uuid4().hex[:12]
+    job = _escanear_visual_em_thread(job_id, lista)
+    return jsonify({'job_id': job_id, 'pastas': lista, **job})
 
 
 @bp.route('/api/mix/visual-pick', methods=['GET'])
@@ -442,6 +558,10 @@ def mix_mixes_post():
         'visual_id': b.get('visual_id') or None,
         'duracao_s': b.get('duracao_s') or None,
         'formato': 'wav' if b.get('formato') == 'wav' else 'mp3',
+        # opacos aqui de proposito: mesma validacao de b.get('musica_params')/atraso_s ja
+        # roda no /render quando o mix reaberto for tocado — nao duplica regra de clamp
+        'musica_params': b.get('musica_params') or None,
+        'atraso_s': b.get('atraso_s') or None,
         'salvo_em': datetime.now().isoformat(timespec='seconds'),
     }
     _grava_json(MIXES, d)

@@ -36,6 +36,7 @@ import { VintageLed } from '@/components/ui/vintage-led'
 import { VintageMeter } from '@/components/ui/vintage-meter'
 import { VintageOscilloscope } from '@/components/ui/vintage-oscilloscope'
 import { resolveUrl, audioSrc } from '../lib/api'
+import { fazerIR } from '../lib/audio-fx'
 
 /* ── contrato com o backend ────────────────────────────────────────────────
  * POST /api/domar { path, escuro_db, grave_db, reverb_wet, reverb_decay, alvo_lufs }
@@ -85,27 +86,9 @@ const graveParaY = (db: number) => (db - GRAVE_MIN) / (GRAVE_MAX - GRAVE_MIN)
 
 const fmtDb = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
 
-/**
- * IR sintético para o preview: ruído com decaimento exponencial.
- *
- * É a mesma receita do `_ir()` do backend, e é de propósito — dois geradores
- * diferentes dariam preview e render com espaços diferentes, que é pior que não ter
- * preview. Os canais recebem ruído independente: dois iguais convolvem para uma cauda
- * mono no centro, o oposto do que reverb serve para fazer.
- */
-function fazerIR(ctx: AudioContext, decay: number): AudioBuffer {
-  const n = Math.max(1, Math.floor(ctx.sampleRate * decay))
-  const buf = ctx.createBuffer(2, n, ctx.sampleRate)
-  for (let c = 0; c < 2; c++) {
-    const d = buf.getChannelData(c)
-    for (let i = 0; i < n; i++) {
-      // decaimento exponencial: e^-5 no fim da cauda é ~-43 dB, que é onde uma cauda
-      // deixa de ser ouvida e passa a ser só CPU.
-      d[i] = (Math.random() * 2 - 1) * Math.exp((-5 * i) / n)
-    }
-  }
-  return buf
-}
+/* IR sintético (ruído com decaimento exponencial) e demais utilidades de fx em tempo
+ * real vivem em `src/lib/audio-fx.ts` — raiz compartilhada com a `/mix`, que precisa
+ * da mesma técnica pra tom+reverb nas camadas e na música. */
 
 export function Eq() {
   /* `?path=` na URL: a /fabrica manda a cama pra cá com um link, em vez de a

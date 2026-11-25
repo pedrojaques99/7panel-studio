@@ -913,6 +913,9 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
   const freestyleEventsRef = useRef<TimedEvent[]>([])
   const freestyleNoteStartRef = useRef<Map<string, number>>(new Map())
   const freestyleTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+  // Export do freestyle como .mid — a ponte pro motor phi da era 5 (Jacão Ambients)
+  const [midiExp, setMidiExp] = useState<'idle' | 'salvando' | 'ok' | 'erro'>('idle')
+  const [midiExpPath, setMidiExpPath] = useState<string | null>(null)
 
   const engineRef = useRef<Engine | null>(null)
   const fxRef = useRef(fx); fxRef.current = fx
@@ -1484,6 +1487,33 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
     setLoops(prev => prev.map((l, i) =>
       i === activeLoopIdx ? { ...l, freestyle: events, freestyleLenMs: loopLen } : l
     ))
+  }
+
+  /**
+   * Manda o loop freestyle ativo pro backend virar .mid na pasta que o render.py da era 5
+   * lê. É o fim da ponte: ele toca a melodia aqui, o motor phi aplica forma, timbre e
+   * efeito em cima. O backend gera o nome pela data quando não vem nome.
+   */
+  async function salvarComoMidi() {
+    const loop = loops[activeLoopIdx]
+    const eventos = loop?.freestyle
+    if (!eventos || eventos.length === 0) return
+    setMidiExp('salvando')
+    try {
+      const res = await fetch(resolveUrl('/api/midi/save'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventos, lenMs: loop.freestyleLenMs }),
+      })
+      if (!res.ok) { setMidiExp('erro'); setTimeout(() => setMidiExp('idle'), 3000); return }
+      const info = await res.json()
+      setMidiExpPath(info.path ?? null)
+      setMidiExp('ok')
+      setTimeout(() => setMidiExp('idle'), 3000)
+    } catch {
+      setMidiExp('erro')
+      setTimeout(() => setMidiExp('idle'), 3000)
+    }
   }
 
   function freestyleNoteOn(noteName: string) {
@@ -2240,6 +2270,27 @@ export function SynthPanel({ onClose, instanceId = 'synth' }: { onClose: () => v
                   animation: freestyleRec ? 'pulse-rec 1.2s ease-in-out infinite' : 'none',
                 }}>
                 {freestyleRec ? '⏹ REC' : '⏺'}
+              </button>
+              <button onClick={salvarComoMidi}
+                disabled={freestyleRec || midiExp === 'salvando' || !loops[activeLoopIdx]?.freestyle?.length}
+                title={midiExpPath
+                  ? `Último: ${midiExpPath}`
+                  : 'Salva as notas do loop freestyle (arquivo .mid) em era 5/_gerador/midi'}
+                aria-label="Salvar as notas do freestyle"
+                style={{
+                  ...miniBtn, padding: '2px 8px', width: 'auto', fontSize: 'var(--fs-xs)',
+                  background: midiExp === 'ok' ? 'rgba(0,184,96,0.25)'
+                    : midiExp === 'erro' ? 'rgba(239,68,68,0.25)'
+                    : midiExp === 'salvando' ? 'rgba(255,165,0,0.25)' : 'var(--bg-hover)',
+                  color: midiExp === 'ok' ? 'rgba(0,184,96,0.9)'
+                    : midiExp === 'erro' ? 'rgba(239,68,68,0.9)'
+                    : midiExp === 'salvando' ? 'rgba(255,165,0,0.9)' : '#a78bfa',
+                  opacity: !loops[activeLoopIdx]?.freestyle?.length ? 0.4 : 1,
+                  cursor: midiExp === 'salvando' ? 'wait' : 'pointer',
+                  fontWeight: 900,
+                }}>
+                {midiExp === 'ok' ? '✓ NOTAS' : midiExp === 'erro' ? '✕ NOTAS'
+                  : midiExp === 'salvando' ? '⏳' : '⤓ NOTAS'}
               </button>
               <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', flex: 1 }}>
                 {loops.map((loop, i) => {

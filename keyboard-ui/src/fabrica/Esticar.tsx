@@ -100,6 +100,38 @@ const ESCURO_MAX = 20
 const GRAVE_MIN = -8
 const GRAVE_MAX = 18
 
+/* ── o resto da mesa ───────────────────────────────────────────────
+ *
+ * `domar()` recebe 13 parametros e a rota repassa os 13. Esta tela mandava DOIS. Os
+ * outros onze ja estavam prontos e ociosos — inclusive um reverb, que numa tela
+ * chamada ETEREO e o controle que mais muda o resultado.
+ *
+ * Nada aqui e motor novo no browser: continua tudo indo pro backend, que e ffmpeg e e
+ * medido. O que muda e quanto da mesa a tela alcanca.
+ *
+ * As duas reguas de FRENTE (brilho, grave) ficam como estavam, calibradas no ouvido
+ * dele. As novas tem default IGUAL ao default do Python, entao a tela sem ninguem
+ * mexer manda exatamente o que mandava antes.
+ */
+const REVERB_DECAY_MIN = 0.5
+const REVERB_DECAY_MAX = 12
+const LUFS_MIN = -24
+const LUFS_MAX = -9
+const FORCA_MIN = 3
+const FORCA_MAX = 30
+const ESCURO_HZ_MIN = 2000
+const ESCURO_HZ_MAX = 9000
+const GRAVE_HZ_MIN = 60
+const GRAVE_HZ_MAX = 220
+const PICO_MIN = 2
+const PICO_MAX = 12
+
+/** O que o `domar()` usa quando ninguem manda nada. Mexer daqui = mexer de verdade. */
+const FX_PADRAO = {
+  reverbWet: 0, reverbDecay: 2.5, alvoLufs: -16, achatar: true,
+  forca: 12, escuroHz: 4500, graveHz: 110, limiarPico: 5,
+}
+
 /** O achatador só entra na faixa de ressaca. Fora dela, não mexer é o certo. */
 const RESSACA_MIN_S = 1
 const RESSACA_MAX_S = 60
@@ -359,12 +391,26 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
      O padrão sai da receita medida, pra tela abrir no que o pipeline já faria. */
   const [escuroDb, setEscuroDb] = useState<number>(receita?.escuro_db ?? 7)
   const [graveDb, setGraveDb] = useState(0)
+  /* O resto da mesa. Default identico ao do Python: tela parada manda o de sempre. */
+  const [reverbWet, setReverbWet] = useState(FX_PADRAO.reverbWet)
+  const [reverbDecay, setReverbDecay] = useState(FX_PADRAO.reverbDecay)
+  const [alvoLufs, setAlvoLufs] = useState(FX_PADRAO.alvoLufs)
+  const [achatar, setAchatar] = useState(FX_PADRAO.achatar)
+  const [forcaAchata, setForcaAchata] = useState(FX_PADRAO.forca)
+  const [escuroHz, setEscuroHz] = useState(FX_PADRAO.escuroHz)
+  const [graveHz, setGraveHz] = useState(FX_PADRAO.graveHz)
+  const [limiarPico, setLimiarPico] = useState(FX_PADRAO.limiarPico)
+  /** O fundo da mesa fica fechado: passo opcional nao disputa altura com a onda. */
+  const [mesaAberta, setMesaAberta] = useState(false)
   const [eqSujo, setEqSujo] = useState(false)
   /** Quem pediu o master: o automático do render, ou o APLICAR do EQ. */
   const [masterPedido, setMasterPedido] = useState(false)
 
-  const fator = enxuto ? forca.fator : (receita?.esticar ?? 12)
-  const janela = enxuto ? forca.janela : (receita?.janela ?? 0.5)
+  /** No completo, `null` = obedecer a receita medida; uma força = a mão por cima. */
+  const [forcaManual, setForcaManual] = useState<Forca | null>(null)
+
+  const fator = enxuto ? forca.fator : (forcaManual?.fator ?? receita?.esticar ?? 12)
+  const janela = enxuto ? forca.janela : (forcaManual?.janela ?? receita?.janela ?? 0.5)
 
   const ondaFonte = usePeaks(path)
   const ondaEsticada = usePeaks(res?.path ?? null)
@@ -415,7 +461,7 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
     }
   }, [path, habilitado, estado, fator, janela])
 
-  const chamarDomar = useCallback(async (gosto?: { escuro_db: number; grave_db: number }) => {
+  const chamarDomar = useCallback(async (gosto?: Record<string, number | boolean>) => {
     if (!res?.path || domando) return
     setDomando(true); setDomarErro(''); setDomar(null)
     try {
@@ -475,19 +521,28 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
   /* Trocar de força joga fora a cama anterior: ela é de outra receita, e deixar a
      onda velha na tela debaixo de uma pílula nova é a tela mentindo sobre o que
      está tocando. Quem troca volta pro botão. */
-  const trocarForca = useCallback((f: Forca) => {
-    if (f.id === forca.id) return
-    setForca(f)
+  const trocarForca = useCallback((f: Forca | null) => {
+    if (f && f.id === forca.id && forcaManual?.id === f.id) return
+    if (f) setForca(f)
+    setForcaManual(f)
+    /* Trocar a força invalida o render inteiro: o esticado, a medição e o master
+       eram daquele fator. Deixar a onda velha na tela seria mentir sobre o que toca. */
     setEstado('parado'); setRes(null); setSeg(0)
     setDomar(null); setDomarErro(''); setEqSujo(false)
     domadoRef.current = null
-  }, [forca.id])
+  }, [forca.id, forcaManual?.id])
 
   const refazerMaster = useCallback(() => {
     setEqSujo(false); setMasterPedido(true)
     domadoRef.current = res?.path ?? null   // segura o automático
-    void chamarDomar({ escuro_db: escuroDb, grave_db: graveDb })
-  }, [chamarDomar, escuroDb, graveDb, res])
+    void chamarDomar({
+      escuro_db: escuroDb, grave_db: graveDb,
+      reverb_wet: reverbWet, reverb_decay: reverbDecay,
+      alvo_lufs: alvoLufs, achatar, forca: forcaAchata,
+      escuro_hz: escuroHz, grave_hz: graveHz, limiar_pico: limiarPico,
+    })
+  }, [chamarDomar, escuroDb, graveDb, reverbWet, reverbDecay, alvoLufs, achatar,
+      forcaAchata, escuroHz, graveHz, limiarPico, res])
 
   /* o aviso do fator: campo ausente quando o backend devolve render cacheado */
   const fatorCurto = res?.fator_ok === false
@@ -500,11 +555,30 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
           Fica visível SEMPRE, inclusive depois do render: é por ela que se compara
           uma versão com a outra, e comparação com o controle escondido não acontece.
           Mesma pílula do TOCAR, mesma escala de tinta. */}
-      {enxuto && path && (
+      {path && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: ESP.xs }}>
           <div style={{ display: 'flex', gap: ESP.xs, flexWrap: 'wrap' }}>
+            {/* No COMPLETO a receita medida em MEDIR é a primeira pílula e vem ligada:
+                ela é a única que tem NÚMERO atrás, e apagá-la faria o passo anterior não
+                servir pra nada. As três da direita são a mão por cima da medição, que é o
+                que ele pediu ("quero tudo que há na etéreo"). */}
+            {!enxuto && receita && (
+              <button
+                type="button"
+                onClick={() => trocarForca(null)}
+                aria-pressed={forcaManual === null}
+                style={{
+                  padding: '7px 14px', borderRadius: 999, cursor: 'pointer',
+                  font: `700 10px ${MONO}`, letterSpacing: '0.14em',
+                  background: forcaManual === null ? ACESO_FRACO : 'transparent',
+                  border: `1px solid ${forcaManual === null ? ACESO : t12}`,
+                  color: forcaManual === null ? ACESO : t45,
+                }}>
+                RECEITA {receita.esticar}×
+              </button>
+            )}
             {FORCAS.map(f => {
-              const on = f.id === forca.id
+              const on = enxuto ? f.id === forca.id : f.id === forcaManual?.id
               return (
                 <button
                   key={f.id}
@@ -525,8 +599,8 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
           </div>
           {/* UMA linha, a do escolhido: é a única que descreve o que se vai ouvir */}
           <span style={qualificadorTok}>
-            {forca.marca}
-            {durFonte ? `, uns ${relogio(durFonte * forca.fator)}` : ''}
+            {enxuto || forcaManual ? forca.marca : 'o que a medição prescreveu'}
+            {durFonte ? `, uns ${relogio(durFonte * fator)}` : ''}
           </span>
         </div>
       )}
@@ -650,7 +724,7 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
               calibradas no ouvido numa sessão real. Quem responde é o backend: um
               segundo motor de áudio no browser é a estrutura que produziu o bug do
               overlap, e a /eq já tem o preview ao vivo pra quem quer arrastar. */}
-          {enxuto && (
+          {(
             <div style={{
               display: 'flex', flexDirection: 'column', gap: ESP.sm,
               paddingTop: ESP.md, borderTop: `1px solid ${t12}`,
@@ -669,8 +743,126 @@ export function Esticar({ path, destino, receita, habilitado, modo = 'completo' 
                 unidade="dB"
                 x={(graveDb - GRAVE_MIN) / (GRAVE_MAX - GRAVE_MIN)}
                 onChange={x => { setGraveDb(GRAVE_MIN + x * (GRAVE_MAX - GRAVE_MIN)); setEqSujo(true) }}
-                legenda="corpo embaixo de 110 Hz"
+                legenda={`corpo embaixo de ${Math.round(graveHz)} Hz`}
               />
+
+              {/* REVERB e CAUDA sobem pra frente numa tela chamada ETÉREO: é o par que
+                  mais muda o resultado, e estava ocioso no backend desde sempre. */}
+              <Eixo
+                rotulo="REVERB"
+                valor={`${Math.round(reverbWet * 100)}`}
+                unidade="%"
+                x={reverbWet}
+                onChange={x => { setReverbWet(x); setEqSujo(true) }}
+                legenda={reverbWet > 0
+                  ? 'com reverb o limiter sai da cadeia; quem segura o nível é o ALVO'
+                  : 'sala em cima da cama, depois do EQ'}
+              />
+              <Eixo
+                rotulo="CAUDA"
+                valor={reverbDecay.toFixed(1).replace('.', ',')}
+                unidade="s"
+                x={(reverbDecay - REVERB_DECAY_MIN) / (REVERB_DECAY_MAX - REVERB_DECAY_MIN)}
+                onChange={x => {
+                  setReverbDecay(REVERB_DECAY_MIN + x * (REVERB_DECAY_MAX - REVERB_DECAY_MIN))
+                  setEqSujo(true)
+                }}
+                legenda="quanto tempo a sala leva pra sumir"
+              />
+
+              {/* ── o fundo da mesa ────────────────────────────────────────
+                  Fechado por padrão pela mesma regra do DOMAR colapsado: o que é
+                  ajuste fino não disputa altura com a onda, que é o que se veio ver.
+                  Aberto, são os parâmetros que o `domar()` já media e consertava
+                  sozinho — aqui eles viram escolha. */}
+              <button
+                type="button"
+                onClick={() => setMesaAberta(a => !a)}
+                aria-expanded={mesaAberta}
+                style={{
+                  alignSelf: 'flex-start', padding: '4px 0', background: 'none',
+                  border: 'none', cursor: 'pointer', color: t45,
+                  font: `700 10px ${MONO}`, letterSpacing: '0.16em',
+                }}>
+                {mesaAberta ? '▽ MENOS' : '▷ O RESTO DA MESA'}
+              </button>
+
+              {mesaAberta && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: ESP.sm,
+                  paddingLeft: ESP.sm, borderLeft: `1px solid ${t12}`,
+                }}>
+                  <Eixo
+                    rotulo="ALVO"
+                    valor={alvoLufs.toFixed(1).replace('.', ',')}
+                    unidade="LUFS"
+                    x={(alvoLufs - LUFS_MIN) / (LUFS_MAX - LUFS_MIN)}
+                    onChange={x => { setAlvoLufs(LUFS_MIN + x * (LUFS_MAX - LUFS_MIN)); setEqSujo(true) }}
+                    legenda="o nível que sai medido no fim; −16 é o da casa"
+                  />
+                  <Eixo
+                    rotulo="CORTE AGUDO"
+                    valor={`${Math.round(escuroHz)}`}
+                    unidade="Hz"
+                    x={(escuroHz - ESCURO_HZ_MIN) / (ESCURO_HZ_MAX - ESCURO_HZ_MIN)}
+                    onChange={x => { setEscuroHz(ESCURO_HZ_MIN + x * (ESCURO_HZ_MAX - ESCURO_HZ_MIN)); setEqSujo(true) }}
+                    legenda="de onde pra cima o BRILHO age"
+                  />
+                  <Eixo
+                    rotulo="CORTE GRAVE"
+                    valor={`${Math.round(graveHz)}`}
+                    unidade="Hz"
+                    x={(graveHz - GRAVE_HZ_MIN) / (GRAVE_HZ_MAX - GRAVE_HZ_MIN)}
+                    onChange={x => { setGraveHz(GRAVE_HZ_MIN + x * (GRAVE_HZ_MAX - GRAVE_HZ_MIN)); setEqSujo(true) }}
+                    legenda="de onde pra baixo o GRAVE age"
+                  />
+                  <Eixo
+                    rotulo="APITO"
+                    valor={limiarPico.toFixed(1).replace('.', ',')}
+                    unidade="x a mediana"
+                    x={(limiarPico - PICO_MIN) / (PICO_MAX - PICO_MIN)}
+                    onChange={x => { setLimiarPico(PICO_MIN + x * (PICO_MAX - PICO_MIN)); setEqSujo(true) }}
+                    legenda="quão fino o caçador de apito é; pra baixo notcha mais parcial"
+                  />
+
+                  {/* ONDA é liga/desliga + força: o achatador só faz sentido inteiro. */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => { setAchatar(a => !a); setEqSujo(true) }}
+                      aria-pressed={achatar}
+                      style={{
+                        alignSelf: 'flex-start',
+                        display: 'flex', alignItems: 'center', gap: ESP.xs,
+                        padding: '6px 12px', borderRadius: 999, cursor: 'pointer',
+                        font: `700 10px ${MONO}`, letterSpacing: '0.14em',
+                        background: achatar ? ACESO_FRACO : 'transparent',
+                        border: `1px solid ${achatar ? ACESO : t12}`,
+                        color: achatar ? ACESO : t45,
+                      }}>
+                      <span style={{
+                        width: 9, height: 9, borderRadius: 2,
+                        background: achatar ? ACESO : 'transparent',
+                        border: `1px solid ${achatar ? ACESO : t45}`,
+                      }} />
+                      ACHATAR A ONDA
+                    </button>
+                    <span style={qualificadorTok}>
+                      tira a ressaca que a batida esticada deixa. Desligue se a cama já for lisa
+                    </span>
+                  </div>
+                  {achatar && (
+                    <Eixo
+                      rotulo="FORÇA"
+                      valor={forcaAchata.toFixed(0)}
+                      unidade="do achatador"
+                      x={(forcaAchata - FORCA_MIN) / (FORCA_MAX - FORCA_MIN)}
+                      onChange={x => { setForcaAchata(FORCA_MIN + x * (FORCA_MAX - FORCA_MIN)); setEqSujo(true) }}
+                      legenda="pra cima achata mais e mata mais movimento junto"
+                    />
+                  )}
+                </div>
+              )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: ESP.md, flexWrap: 'wrap' }}>
                 <button
