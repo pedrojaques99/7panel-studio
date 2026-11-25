@@ -731,6 +731,12 @@ def list_assets():
 
 EXTRA_SAMPLE_DIRS = [
     os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'auto-video-editor-ai', 'scripts', '.render-assets', 'ambient')),
+    # camadas (stems) das faixas do mathrock, exportadas por stems_mathrock4.py: o editor do Rollo abre cada uma numa trilha
+    os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), 'era7', 'mathrock', 'stems'),
+    # as faixas autorais mais novas (hardlinks, sem copiar), pra entrar no editor do Rollo como cama/referência
+    os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), '_prod', 'autorais-ontem'),
+    # camadas das faixas dos geradores (camadas.py / stems.py): pads, notas afinadas, residuo de fx
+    os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), 'era7', 'stems'),
 ]
 
 SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets', 'samples'))
