@@ -905,6 +905,10 @@ EXTRA_SAMPLE_DIRS = [
     os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), '_prod', 'autorais-ontem'),
     # camadas das faixas dos geradores (camadas.py / stems.py): pads, notas afinadas, residuo de fx
     os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), 'era7', 'stems'),
+    # pastas favoritas do dono (som_pastas.json, "favoritas"): o cc0 e o sfx do Jacão Ambients. As
+    # outras duas (VHULTO, Zero-G) já moram em assets/samples.
+    os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), 'assets', 'cc0'),
+    os.path.join(os.environ.get('JACAO_AMBIENTS_DIR', r'Z:\jaques.dsgn\sfx_music\Jacão Ambients'), 'assets', 'sfx'),
 ]
 
 SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'assets', 'samples'))

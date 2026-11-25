@@ -101,6 +101,12 @@ def pastas_cadastradas():
     return _le(PASTAS, {}).get("pastas", [])
 
 
+def pastas_favoritas():
+    """As pastas favoritas do dono (sons que ele mais usa): o editor de música e os showreels
+    sugerem delas primeiro. Ficam em som_pastas.json, chave "favoritas"."""
+    return _le(PASTAS, {}).get("favoritas", [])
+
+
 def prefixo_para(pasta, existentes):
     """Prefixo curto e estável pro id: nome da pasta, com hash só se já houver outra igual."""
     base = (norm(os.path.basename(pasta.rstrip("\\/"))) or "pasta") + "-"
@@ -127,13 +133,13 @@ def adicionar(pasta, origem="proprio"):
         raise ValueError("essa pasta já está coberta por %s" % mae)
     lista = [p for p in lista if not _dentro(p["pasta"], pasta)]
     lista.append({"pasta": pasta, "prefixo": prefixo_para(pasta, {p.get("prefixo") for p in lista}), "origem": origem})
-    _grava(PASTAS, {"pastas": lista})
+    _grava(PASTAS, {**_le(PASTAS, {}), "pastas": lista})  # preserva as outras chaves (favoritas)
     return lista
 
 
 def remover(pasta):
     lista = [p for p in pastas_cadastradas() if not _igual(p["pasta"], pasta)]
-    _grava(PASTAS, {"pastas": lista})
+    _grava(PASTAS, {**_le(PASTAS, {}), "pastas": lista})  # preserva as outras chaves (favoritas)
     return lista
 
 
